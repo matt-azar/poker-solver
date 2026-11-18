@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   canOfferReopenLastCheckpoint,
+  classifyEngineFault,
   classifyEngineSessionFault,
   coldReconnectMessage,
+  decideReadyProbeOnExistingChild,
+  decideStatusPollRecovery,
   disconnectedRecoveryMessage,
+  isAdmissionSaturationDetail,
   isEngineSessionDead,
   isRecoveryOrUnreachableMessage,
   isSoftRpcTimeoutDetail,
@@ -241,5 +245,212 @@ describe("sessionRecovery", () => {
     const withoutPath = coldReconnectMessage({ label: "engine" });
     expect(withoutPath).toMatch(/Unsaved train progress is gone/i);
     expect(withoutPath).toMatch(/Save before a crash/i);
+  });
+
+  describe("IPC audit §3 congestion / Complete / Ready policy", () => {
+    const saturation =
+      "admission saturated: 8/8 outstanding requests";
+    const softTimeout = "status request timed out";
+
+    it("row1: three soft status timeouts during Solving preserve the session", () => {
+      const decision = decideStatusPollRecovery({
+        consecutiveFailures: STATUS_POLL_DEAD_AFTER_FAILURES,
+        detail: softTimeout,
+        phase: "solving",
+      });
+      expect(decision.markDead).toBe(false);
+      expect(decision.terminate).toBe(false);
+      expect(decision.reason).toBe("soft_timeout_preserve");
+      expect(
+        shouldTerminateHungSidecar({
+          consecutiveFailures: STATUS_POLL_DEAD_AFTER_FAILURES,
+          detail: softTimeout,
+          phase: "solving",
+        }),
+      ).toBe(false);
+    });
+
+    it("row2: three status admission-saturation errors during Solving do not terminate", () => {
+      expect(isAdmissionSaturationDetail(saturation)).toBe(true);
+      expect(isEngineSessionDead(saturation)).toBe(false);
+      const decision = decideStatusPollRecovery({
+        consecutiveFailures: STATUS_POLL_DEAD_AFTER_FAILURES,
+        detail: saturation,
+        phase: "solving",
+      });
+      expect(decision.markDead).toBe(false);
+      expect(decision.terminate).toBe(false);
+      expect(decision.reason).toBe("congestion_backoff");
+      expect(decision.fault.congestion).toBe(true);
+      expect(decision.fault.faultClass).toBe("queue_saturation");
+      expect(
+        shouldMarkStatusPollDead({
+          consecutiveFailures: STATUS_POLL_DEAD_AFTER_FAILURES,
+          detail: saturation,
+          phase: "solving",
+        }),
+      ).toBe(false);
+      expect(
+        shouldTerminateHungSidecar({
+          consecutiveFailures: STATUS_POLL_DEAD_AFTER_FAILURES,
+          detail: saturation,
+          phase: "solving",
+        }),
+      ).toBe(false);
+    });
+
+    it("row2: typed queue_saturation during Solving is congestion backoff in every phase", () => {
+      for (const phase of ["solving", "complete", "idle"] as const) {
+        const decision = decideStatusPollRecovery({
+          consecutiveFailures: STATUS_POLL_DEAD_AFTER_FAILURES,
+          detail: "wrapped",
+          phase,
+          error: {
+            message: saturation,
+            ipcClass: "queue_saturation",
+            phase: "before_write",
+            origin: "status",
+            launchId: "launch-a",
+          },
+        });
+        expect(decision.terminate).toBe(false);
+        expect(decision.reason).toBe("congestion_backoff");
+        expect(decision.fault.faultClass).toBe("queue_saturation");
+        expect(decision.fault.phase).toBe("before_write");
+        expect(decision.fault.origin).toBe("status");
+        expect(decision.fault.launchId).toBe("launch-a");
+      }
+    });
+
+    it("row3: three ordinary status timeouts in Complete do not kill (unsaved solution)", () => {
+      const decision = decideStatusPollRecovery({
+        consecutiveFailures: STATUS_POLL_DEAD_AFTER_FAILURES,
+        detail: softTimeout,
+        phase: "complete",
+      });
+      expect(decision.markDead).toBe(false);
+      expect(decision.terminate).toBe(false);
+      expect(decision.reason).toBe("soft_timeout_preserve");
+      expect(
+        shouldTerminateHungSidecar({
+          consecutiveFailures: STATUS_POLL_DEAD_AFTER_FAILURES,
+          detail: softTimeout,
+          phase: "complete",
+        }),
+      ).toBe(false);
+    });
+
+    it("row4: Ready probe timeout / admission on existing child preserve + explicit restart", () => {
+      const timedOut = decideReadyProbeOnExistingChild({
+        message: "ensure ready probe failed: status request timed out",
+        ipcClass: "timeout",
+        phase: "before_write",
+        launchId: "launch-b",
+      });
+      expect(timedOut.teardown).toBe(false);
+      expect(timedOut.preserve).toBe(true);
+      expect(timedOut.explicitRestart).toBe(true);
+      expect(timedOut.observation).toBe("missed_observation");
+      expect(timedOut.fault.faultClass).toBe("timeout");
+      expect(timedOut.fault.phase).toBe("before_write");
+      expect(timedOut.fault.launchId).toBe("launch-b");
+
+      const congested = decideReadyProbeOnExistingChild({
+        message: saturation,
+        class: "queue_saturation",
+        origin: "ensure",
+      });
+      expect(congested.teardown).toBe(false);
+      expect(congested.preserve).toBe(true);
+      expect(congested.explicitRestart).toBe(true);
+      expect(congested.observation).toBe("congestion");
+      expect(congested.fault.origin).toBe("ensure");
+    });
+
+    it("row4: Ready probe without typed class fails closed toward preserve + explicit restart", () => {
+      const missingClass = decideReadyProbeOnExistingChild(
+        "ensure ready probe failed: something odd",
+      );
+      expect(missingClass.teardown).toBe(false);
+      expect(missingClass.preserve).toBe(true);
+      expect(missingClass.explicitRestart).toBe(true);
+      expect(missingClass.observation).toBe("unknown");
+      expect(missingClass.reason).toMatch(/fail closed/i);
+
+      // Timeout/admission text alone also must not tear down.
+      const timeoutText = decideReadyProbeOnExistingChild(
+        "ensure ready probe failed: timed out waiting for ready",
+      );
+      expect(timeoutText.teardown).toBe(false);
+      expect(timeoutText.preserve).toBe(true);
+      expect(timeoutText.observation).toBe("missed_observation");
+
+      const admissionText = decideReadyProbeOnExistingChild(
+        `ensure ready probe failed: ${saturation}`,
+      );
+      expect(admissionText.teardown).toBe(false);
+      expect(admissionText.observation).toBe("congestion");
+    });
+
+    it("row4: Ready probe connection_loss / process exit may tear down", () => {
+      const pipe = decideReadyProbeOnExistingChild({
+        message: "connection_loss: solver-engine pipe closed",
+        ipcClass: "connection_loss",
+      });
+      expect(pipe.teardown).toBe(true);
+      expect(pipe.preserve).toBe(false);
+      expect(pipe.observation).toBe("failed_connection");
+
+      const exit = decideReadyProbeOnExistingChild({
+        message: "sidecar_exit: solver-engine exiting",
+        class: "connection_loss",
+      });
+      expect(exit.teardown).toBe(true);
+      expect(exit.observation).toBe("process_exit");
+    });
+
+    it("preserves typed error class / phase / origin on EngineError-like inputs", () => {
+      const fault = classifyEngineFault({
+        message: "status request timed out",
+        ipcClass: "timeout",
+        phase: "after_write",
+        origin: "status-poll",
+        op: "status",
+        requestId: "r-9",
+        launchId: "launch-c",
+        degraded: true,
+        errorCode: "timeout",
+      });
+      expect(fault.faultClass).toBe("timeout");
+      expect(fault.classFromTypedField).toBe(true);
+      expect(fault.phase).toBe("after_write");
+      expect(fault.origin).toBe("status-poll");
+      expect(fault.op).toBe("status");
+      expect(fault.requestId).toBe("r-9");
+      expect(fault.launchId).toBe("launch-c");
+      expect(fault.degraded).toBe(true);
+      expect(fault.errorCode).toBe("timeout");
+      expect(fault.softTimeout).toBe(true);
+      expect(fault.sessionDead).toBe(false);
+    });
+
+    it("queued-bytes admission text is congestion, never hung-kill", () => {
+      const detail =
+        "admission saturated: queued bytes 1048576+4096 exceed 1048576";
+      expect(
+        shouldTerminateHungSidecar({
+          consecutiveFailures: STATUS_POLL_DEAD_AFTER_FAILURES,
+          detail,
+          phase: "solving",
+        }),
+      ).toBe(false);
+      expect(
+        decideStatusPollRecovery({
+          consecutiveFailures: STATUS_POLL_DEAD_AFTER_FAILURES,
+          detail,
+          phase: "idle",
+        }).reason,
+      ).toBe("congestion_backoff");
+    });
   });
 });
