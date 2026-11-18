@@ -121,6 +121,13 @@ pub fn shutdownOnParentEof(state: *dispatch.HostState) void {
     state.joinAnalysis();
     state.joinCompare();
     state.joinPreview();
+
+    // Session train/begin clear stop_requested on cooperative exit so a later
+    // Continue is not sticky-cancelled. Parent-gone must remain latched through
+    // teardown (audit §8): re-assert after joins so pool/train/Compare cleanup
+    // cannot erase the EOF stop signal the test and status observers rely on.
+    // Same fix as #479 tip d88639c.
+    state.session.requestStop();
 }
 
 pub fn main() !void {
@@ -354,7 +361,9 @@ const EofTrainSim = struct {
             self.state.job_mu.unlock();
         }
         self.state.session.trainGated(self.iterations, 0, 1, -1) catch {};
-        if (self.state.session.stop_requested.load(.acquire)) {
+        // trainGated clears stop_requested on cancel; last_terminal is the
+        // durable observation that stop was honored before join returned.
+        if (self.state.session.last_terminal == .cancelled) {
             self.saw_stop_before_exit.store(true, .release);
         }
     }
