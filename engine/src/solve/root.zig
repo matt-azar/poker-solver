@@ -23,4 +23,5 @@ test {
     _ = @import("lock_apply_train_rematch_test.zig");
     _ = @import("lock_per_combo_correctness_test.zig");
     _ = @import("lock_scope_mask_test.zig");
+    _ = @import("frozen_icm_rematch_test.zig");
 }

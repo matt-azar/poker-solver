@@ -73,8 +73,32 @@ fn icmRecurse(
     }
 }
 
+/// Soft cap for stack-buffer ICM (final tables / satellite fields). Larger
+/// tables fall back to the allocator path in `icmEquities` / `applyIcmTerminal`.
+pub const max_stack_seats: usize = 16;
+
+fn icmEquitiesInto(stacks: []const f64, payouts: []const f64, work: []f64, equities: []f64) IcmError!void {
+    try validateInputs(stacks, payouts);
+    if (work.len < stacks.len or equities.len < stacks.len) return error.InvalidIcm;
+    @memcpy(work[0..stacks.len], stacks);
+    @memset(equities[0..stacks.len], 0);
+    var alive: usize = 0;
+    for (work[0..stacks.len]) |s| {
+        if (s > 0.0) alive += 1;
+    }
+    icmRecurse(work[0..stacks.len], alive, payouts, 0, 1.0, equities[0..stacks.len]);
+}
+
 pub fn icmEquities(allocator: std.mem.Allocator, stacks: []const f64, payouts: []const f64) IcmError![]f64 {
     try validateInputs(stacks, payouts);
+    if (stacks.len <= max_stack_seats) {
+        var work_buf: [max_stack_seats]f64 = undefined;
+        var eq_buf: [max_stack_seats]f64 = undefined;
+        try icmEquitiesInto(stacks, payouts, work_buf[0..stacks.len], eq_buf[0..stacks.len]);
+        const equities = allocator.alloc(f64, stacks.len) catch return error.InvalidIcm;
+        @memcpy(equities, eq_buf[0..stacks.len]);
+        return equities;
+    }
     const work = allocator.dupe(f64, stacks) catch return error.InvalidIcm;
     defer allocator.free(work);
     const equities = allocator.alloc(f64, stacks.len) catch return error.InvalidIcm;
@@ -87,6 +111,8 @@ pub fn icmEquities(allocator: std.mem.Allocator, stacks: []const f64, payouts: [
     return equities;
 }
 
+/// Chip → ICM delta for seats 0/1. Allocation-free when `stacks.len <= max_stack_seats`
+/// (production frozen CFR+ path); allocator only for oversized tables.
 pub fn applyIcmTerminal(
     allocator: std.mem.Allocator,
     icm: IcmConfig,
@@ -97,6 +123,34 @@ pub fn applyIcmTerminal(
     try validateInputs(icm.stacks, icm.payouts);
     if (!std.math.isFinite(chip_terminal.utility[0]) or !std.math.isFinite(chip_terminal.utility[1])) {
         return error.InvalidIcm;
+    }
+
+    if (icm.stacks.len <= max_stack_seats) {
+        var post_buf: [max_stack_seats]f64 = undefined;
+        var work_buf: [max_stack_seats]f64 = undefined;
+        var pre_buf: [max_stack_seats]f64 = undefined;
+        var post_eq_buf: [max_stack_seats]f64 = undefined;
+        const n = icm.stacks.len;
+        @memcpy(post_buf[0..n], icm.stacks);
+        post_buf[0] += chip_terminal.utility[0];
+        post_buf[1] += chip_terminal.utility[1];
+        if (!(post_buf[0] >= 0.0) or !(post_buf[1] >= 0.0)) return error.InvalidIcm;
+
+        try icmEquitiesInto(icm.stacks, icm.payouts, work_buf[0..n], pre_buf[0..n]);
+
+        var post_total: f64 = 0;
+        for (post_buf[0..n]) |s| post_total += s;
+        if (post_total > 0.0) {
+            try icmEquitiesInto(post_buf[0..n], icm.payouts, work_buf[0..n], post_eq_buf[0..n]);
+        } else {
+            @memset(post_eq_buf[0..n], 0);
+        }
+        return .{
+            .utility = .{
+                post_eq_buf[0] - pre_buf[0],
+                post_eq_buf[1] - pre_buf[1],
+            },
+        };
     }
 
     var post = allocator.dupe(f64, icm.stacks) catch return error.InvalidIcm;
