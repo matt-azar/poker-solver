@@ -81,7 +81,12 @@ describe("EngineClient Slice A IPC branches", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "solve",
-      body: { iterations: 5, time_limit: 30 },
+      body: {
+        iterations: 5,
+        time_limit: 30,
+        solution_id: "s1",
+        launch_id: "t",
+      },
       jobId: "j1",
     });
   });
@@ -92,6 +97,7 @@ describe("EngineClient Slice A IPC branches", () => {
         accepted: true,
         running: true,
         solution_id: 2,
+        baseline_solution_id: 1,
         async: true,
         threads: 1,
       }),
@@ -105,6 +111,7 @@ describe("EngineClient Slice A IPC branches", () => {
       running: true,
       job_id: "j1",
       solution_id: "s2",
+      baseline_solution_id: "s1",
       trained: 0,
       terminal_reason: "admitted",
       transport: "ipc",
@@ -112,7 +119,13 @@ describe("EngineClient Slice A IPC branches", () => {
     });
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "resolve_locked",
-      body: { iterations: 8, warm_start: 0, time_limit: 12 },
+      body: {
+        iterations: 8,
+        warm_start: 0,
+        time_limit: 12,
+        solution_id: "s1",
+        launch_id: "t",
+      },
       jobId: "j1",
     });
   });
@@ -153,6 +166,7 @@ describe("EngineClient Slice A IPC branches", () => {
   it("routes getNode / open / save over IPC", async () => {
     invoke.mockResolvedValueOnce(
       okBody("node", {
+        solution_id: "s1",
         node_id: "p0.t-1.r-1",
         actions: ["Check"],
         combos: ["AsQs"],
@@ -165,7 +179,7 @@ describe("EngineClient Slice A IPC branches", () => {
     expect(node.solution_id).toBe("s1");
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "node",
-      body: { node_id: "p0.t-1.r-1" },
+      body: { node_id: "p0.t-1.r-1", solution_id: "s1", launch_id: "t" },
       jobId: null,
     });
 
@@ -183,16 +197,26 @@ describe("EngineClient Slice A IPC branches", () => {
     expect(status.solution_id).toBe("s2");
     expect(status.running).toBe(false);
 
-    invoke.mockResolvedValueOnce(okBody("save", { saved: true }));
-    await expect(client.save("s2", "/tmp/demo.psol")).resolves.toEqual({ saved: true });
+    invoke.mockResolvedValueOnce(okBody("save", { saved: true, solution_id: "s2" }));
+    await expect(client.save("s2", "/tmp/demo.psol")).resolves.toEqual({
+      saved: true,
+      solution_id: "s2",
+    });
 
-    invoke.mockResolvedValueOnce(okBody("save", { saved: true }));
+    invoke.mockResolvedValueOnce(
+      okBody("save", { saved: true, solution_id: "s2", policy_revision: 1 }),
+    );
     await expect(
       client.save("s2", "/tmp/study.psol", { studyOnly: true }),
-    ).resolves.toEqual({ saved: true });
+    ).resolves.toEqual({ saved: true, solution_id: "s2", policy_revision: 1 });
     expect(invoke).toHaveBeenLastCalledWith("solver_engine_request", {
       op: "save",
-      body: { path: "/tmp/study.psol", study_only: true },
+      body: {
+        path: "/tmp/study.psol",
+        study_only: true,
+        solution_id: "s2",
+        launch_id: "t",
+      },
       jobId: null,
     });
 
@@ -243,7 +267,7 @@ describe("EngineClient Slice C locks IPC branches", () => {
     await expect(client.listLocks("s1")).resolves.toEqual({ locks: [] });
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "list_locks",
-      body: null,
+      body: { solution_id: "s1", launch_id: "t" },
       jobId: null,
     });
 
@@ -262,7 +286,7 @@ describe("EngineClient Slice C locks IPC branches", () => {
     expect((put as { locks: unknown[] }).locks).toHaveLength(1);
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "put_lock",
-      body: putBody,
+      body: { ...putBody, solution_id: "s1", launch_id: "t" },
       jobId: null,
     });
 
@@ -270,7 +294,7 @@ describe("EngineClient Slice C locks IPC branches", () => {
     await expect(client.deleteLock("s1", "p0.t-1.r-1")).resolves.toEqual({ locks: [] });
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "delete_lock",
-      body: { node_id: "p0.t-1.r-1" },
+      body: { node_id: "p0.t-1.r-1", solution_id: "s1", launch_id: "t" },
       jobId: null,
     });
 
@@ -278,7 +302,12 @@ describe("EngineClient Slice C locks IPC branches", () => {
     await client.deleteLock("s1", "p0.t-1.r-1", 2);
     expect(invoke).toHaveBeenLastCalledWith("solver_engine_request", {
       op: "delete_lock",
-      body: { node_id: "p0.t-1.r-1", hand_index: 2 },
+      body: {
+        node_id: "p0.t-1.r-1",
+        hand_index: 2,
+        solution_id: "s1",
+        launch_id: "t",
+      },
       jobId: null,
     });
   });
@@ -319,7 +348,7 @@ describe("EngineClient ZR-101 strategy-edits IPC branches", () => {
     });
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "list_strategy_edits",
-      body: null,
+      body: { solution_id: "s1", launch_id: "t" },
       jobId: null,
     });
 
@@ -345,7 +374,7 @@ describe("EngineClient ZR-101 strategy-edits IPC branches", () => {
     expect((put as { edits: unknown[] }).edits).toHaveLength(1);
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "put_strategy_edit",
-      body: putBody,
+      body: { ...putBody, solution_id: "s1", launch_id: "t" },
       jobId: null,
     });
 
@@ -356,7 +385,7 @@ describe("EngineClient ZR-101 strategy-edits IPC branches", () => {
     });
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "delete_strategy_edit",
-      body: { node_id: "p0.t-1.r-1" },
+      body: { node_id: "p0.t-1.r-1", solution_id: "s1", launch_id: "t" },
       jobId: null,
     });
 
@@ -364,7 +393,12 @@ describe("EngineClient ZR-101 strategy-edits IPC branches", () => {
     await client.deleteStrategyEdit("s1", "p0.t-1.r-1", 2);
     expect(invoke).toHaveBeenLastCalledWith("solver_engine_request", {
       op: "delete_strategy_edit",
-      body: { node_id: "p0.t-1.r-1", hand_index: 2 },
+      body: {
+        node_id: "p0.t-1.r-1",
+        hand_index: 2,
+        solution_id: "s1",
+        launch_id: "t",
+      },
       jobId: null,
     });
   });
@@ -631,6 +665,7 @@ describe("EngineClient ZR-103 getCategories / compare IPC", () => {
         categories: ["high card", "pair"],
         oop: { defined: true, total_mass: 1, fractions: [0, 1], mass: [0, 1] },
         ip: { defined: true, total_mass: 1, fractions: [1, 0], mass: [1, 0] },
+        solution_id: "s1",
         node_id: "p0.t-1.r-1",
       }),
     );
@@ -644,7 +679,35 @@ describe("EngineClient ZR-103 getCategories / compare IPC", () => {
     expect(body.available).toBe(true);
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "categories",
-      body: { node_index: 0, node_id: "p0.t-1.r-1" },
+      body: {
+        node_index: 0,
+        node_id: "p0.t-1.r-1",
+        solution_id: "s1",
+        launch_id: "t",
+      },
+      jobId: null,
+    });
+  });
+
+  it("preserves host solution_id and does not relabel a newer solution as the caller id", async () => {
+    // Audit #1: after B replaced A, a stale getNode("s1") must not paint B as s1.
+    invoke.mockResolvedValueOnce(
+      okBody("node", {
+        solution_id: "s2",
+        node_id: "p0.t-1.r-1",
+        pot: 160,
+        actions: ["Check"],
+        combos: ["AsQs"],
+        strategy: null,
+        kind: "decision",
+      }),
+    );
+    const node = await client.getNode("s1", "p0.t-1.r-1");
+    expect(node.solution_id).toBe("s2");
+    expect(node.pot).toBe(160);
+    expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
+      op: "node",
+      body: { node_id: "p0.t-1.r-1", solution_id: "s1", launch_id: "t" },
       jobId: null,
     });
   });
@@ -706,7 +769,12 @@ describe("EngineClient ZR-103 getCategories / compare IPC", () => {
     expect(body.value_delta).toBe(1);
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "compare",
-      body: { baseline: "s0", scenario: "s1", node_id: "p0.t-1.r-1" },
+      body: {
+        baseline: "s0",
+        scenario: "s1",
+        node_id: "p0.t-1.r-1",
+        launch_id: "t",
+      },
       jobId: null,
     });
   });

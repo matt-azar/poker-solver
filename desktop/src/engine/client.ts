@@ -50,6 +50,24 @@ function streetConfigTextFromPreviewJob(job: SolveJobRequest | { text: string })
   return formatSolveJobStreetConfig(job as SolveJobRequest);
 }
 
+/** Normalize host solution identity (`s12` or bare 12) without relabeling. */
+function hostedSolutionId(
+  raw: unknown,
+  fallback?: string | null,
+): string | null {
+  if (typeof raw === "string" && raw.trim()) {
+    const text = raw.trim();
+    if (/^s?\d+$/i.test(text)) {
+      return text.toLowerCase().startsWith("s") ? text.toLowerCase() : `s${text}`;
+    }
+    return text;
+  }
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+    return `s${Math.trunc(raw)}`;
+  }
+  return fallback ?? null;
+}
+
 function defaultEngineBaseUrl(): string {
   const fromEnv = import.meta.env.VITE_ENGINE_URL;
   if (typeof fromEnv === "string" && fromEnv.length > 0) {
@@ -360,10 +378,11 @@ export class EngineClient {
         iterations,
         time_limit,
         jobId,
+        solutionId,
       })) as {
         accepted?: boolean;
         running?: boolean;
-        solution_id?: number;
+        solution_id?: number | string;
         policy_revision?: number;
         trained?: number;
         terminal_reason?: string;
@@ -373,10 +392,7 @@ export class EngineClient {
       return {
         running: admitted ? true : false,
         job_id: jobId,
-        solution_id:
-          reply.solution_id != null && reply.solution_id > 0
-            ? `s${reply.solution_id}`
-            : solutionId,
+        solution_id: hostedSolutionId(reply.solution_id, solutionId),
         policy_revision: reply.policy_revision ?? 0,
         trained: admitted ? 0 : (reply.trained ?? iterations),
         terminal_reason: admitted
@@ -430,10 +446,12 @@ export class EngineClient {
         samples,
         time_limit,
         jobId,
+        solutionId,
       })) as {
         accepted?: boolean;
         running?: boolean;
-        solution_id?: number;
+        solution_id?: number | string;
+        baseline_solution_id?: number | string;
         policy_revision?: number;
         trained?: number;
         terminal_reason?: string;
@@ -443,10 +461,8 @@ export class EngineClient {
       return {
         running: admitted ? true : false,
         job_id: jobId,
-        solution_id:
-          reply.solution_id != null && reply.solution_id > 0
-            ? `s${reply.solution_id}`
-            : solutionId,
+        solution_id: hostedSolutionId(reply.solution_id, solutionId),
+        baseline_solution_id: hostedSolutionId(reply.baseline_solution_id),
         policy_revision: reply.policy_revision ?? 0,
         trained: admitted ? 0 : (reply.trained ?? iterations),
         terminal_reason: admitted
@@ -471,11 +487,13 @@ export class EngineClient {
       if (signal?.aborted) {
         throw new EngineError("aborted", 0, null);
       }
-      const data = await ipcNode(nodeId);
+      const data = (await ipcNode(nodeId, solutionId)) as Record<string, unknown>;
+      // Preserve host identity — never relabel a newer solution as the caller id.
+      const served = hostedSolutionId(data.solution_id, solutionId);
       return {
-        ...(data as object),
-        solution_id: solutionId,
-        node_id: nodeId,
+        ...data,
+        ...(served ? { solution_id: served } : {}),
+        node_id: typeof data.node_id === "string" ? data.node_id : nodeId,
       } as NodePayload;
     }
     const { response, data } = await this.request(
@@ -497,11 +515,12 @@ export class EngineClient {
       if (signal?.aborted) {
         throw new EngineError("aborted", 0, null);
       }
-      const data = await ipcValues(nodeId);
+      const data = (await ipcValues(nodeId, solutionId)) as Record<string, unknown>;
+      const served = hostedSolutionId(data.solution_id, solutionId);
       return {
-        ...(data as object),
-        solution_id: solutionId,
-        node_id: nodeId,
+        ...data,
+        ...(served ? { solution_id: served } : {}),
+        node_id: typeof data.node_id === "string" ? data.node_id : nodeId,
       } as ActionValuesPayload;
     }
     const { response, data } = await this.request(
@@ -519,13 +538,19 @@ export class EngineClient {
       if (signal?.aborted) {
         throw new EngineError("aborted", 0, null);
       }
-      const data = await ipcEquity(
-        nodeId ? { nodeId } : { nodeIndex: 0, nodeId: "p0.t-1.r-1" },
-      );
+      const data = (await ipcEquity(
+        nodeId
+          ? { nodeId, solutionId }
+          : { nodeIndex: 0, nodeId: "p0.t-1.r-1", solutionId },
+      )) as Record<string, unknown>;
+      const served = hostedSolutionId(data.solution_id, solutionId);
       return {
-        ...(data as object),
-        solution_id: solutionId,
-        ...(nodeId ? { node_id: nodeId } : { node_id: "p0.t-1.r-1" }),
+        ...data,
+        ...(served ? { solution_id: served } : {}),
+        node_id:
+          typeof data.node_id === "string"
+            ? data.node_id
+            : nodeId ?? "p0.t-1.r-1",
         pending: false,
         equity_scope: "node_reach",
       };
@@ -575,13 +600,17 @@ export class EngineClient {
       if (signal?.aborted) {
         throw new EngineError("aborted", 0, null);
       }
-      const data = await ipcCategories({
+      const data = (await ipcCategories({
         nodeId: nodeId ?? "p0.t-1.r-1",
-      });
+        solutionId,
+      })) as Record<string, unknown>;
+      const served = hostedSolutionId(data.solution_id, solutionId);
       return {
-        ...(data as object),
-        solution_id: solutionId,
-        ...(nodeId ? { node_id: nodeId } : {}),
+        ...data,
+        ...(served ? { solution_id: served } : {}),
+        ...(nodeId || typeof data.node_id === "string"
+          ? { node_id: typeof data.node_id === "string" ? data.node_id : nodeId }
+          : {}),
       };
     }
     const path = nodeId
@@ -604,14 +633,16 @@ export class EngineClient {
     if (opts?.signal?.aborted) {
       throw new EngineError("aborted", 0, null);
     }
-    const data = await ipcLineCardReport({
+    const data = (await ipcLineCardReport({
       nodeId,
       varyStreet: opts?.varyStreet,
-    });
+      solutionId,
+    })) as Record<string, unknown>;
+    const served = hostedSolutionId(data.solution_id, solutionId);
     return {
-      ...(data as object),
-      solution_id: solutionId,
-      node_id: nodeId,
+      ...data,
+      ...(served ? { solution_id: served } : {}),
+      node_id: typeof data.node_id === "string" ? data.node_id : nodeId,
     };
   }
 
@@ -627,14 +658,16 @@ export class EngineClient {
     if (opts?.signal?.aborted) {
       throw new EngineError("aborted", 0, null);
     }
-    const data = await ipcValueBluffsPostCall({
+    const data = (await ipcValueBluffsPostCall({
       nodeId,
       minBetFreq: opts?.minBetFreq,
-    });
+      solutionId,
+    })) as Record<string, unknown>;
+    const served = hostedSolutionId(data.solution_id, solutionId);
     return {
-      ...(data as object),
-      solution_id: solutionId,
-      node_id: nodeId,
+      ...data,
+      ...(served ? { solution_id: served } : {}),
+      node_id: typeof data.node_id === "string" ? data.node_id : nodeId,
     };
   }
 
@@ -669,10 +702,8 @@ export class EngineClient {
       if (signal?.aborted) {
         throw new EngineError("aborted", 0, null);
       }
-      // Host save is sync; solutionId is Study-side identity (host uses current session).
-      void solutionId;
       try {
-        return await ipcSave(path, { studyOnly });
+        return await ipcSave(path, { studyOnly, solutionId });
       } catch (err) {
         if (err instanceof EngineError) throw err;
         throw new EngineError(err instanceof Error ? err.message : String(err), 0, null);
@@ -729,8 +760,10 @@ export class EngineClient {
   /** Spot config for a loaded solution (ranges, bets, tree edits, optional settings). */
   async getSolutionConfig(solutionId: string): Promise<Record<string, unknown>> {
     if (isIpcTransport()) {
-      void solutionId;
-      const body = (await ipcGetConfig()) as { street_config_text?: string };
+      const body = (await ipcGetConfig(solutionId)) as {
+        street_config_text?: string;
+        solution_id?: string | number;
+      };
       const text = typeof body.street_config_text === "string" ? body.street_config_text : "";
       if (!text.trim()) {
         throw new EngineError("solution config unavailable", 404, body);
@@ -832,9 +865,7 @@ export class EngineClient {
 
   async listLocks(solutionId: string): Promise<unknown> {
     if (isIpcTransport()) {
-      // Host Session is single-solution; solutionId is Study-side identity.
-      void solutionId;
-      return ipcListLocks();
+      return ipcListLocks(solutionId);
     }
     const { response, data } = await this.request(
       "GET",
@@ -857,8 +888,7 @@ export class EngineClient {
     },
   ): Promise<unknown> {
     if (isIpcTransport()) {
-      void solutionId;
-      return ipcPutLock(body);
+      return ipcPutLock(body, solutionId);
     }
     const { response, data } = await this.request(
       "PUT",
@@ -876,8 +906,7 @@ export class EngineClient {
     scope?: "node" | "line",
   ): Promise<unknown> {
     if (isIpcTransport()) {
-      void solutionId;
-      return ipcDeleteLock({ nodeId, handIndex, scope });
+      return ipcDeleteLock({ nodeId, handIndex, scope, solutionId });
     }
     const query = new URLSearchParams();
     if (nodeId) {
@@ -900,9 +929,7 @@ export class EngineClient {
 
   async listStrategyEdits(solutionId: string): Promise<unknown> {
     if (isIpcTransport()) {
-      // Host Session is single-solution; solutionId is Study-side identity.
-      void solutionId;
-      return ipcListStrategyEdits();
+      return ipcListStrategyEdits(solutionId);
     }
     const { response, data } = await this.request(
       "GET",
@@ -922,8 +949,7 @@ export class EngineClient {
     },
   ): Promise<unknown> {
     if (isIpcTransport()) {
-      void solutionId;
-      return ipcPutStrategyEdit(body);
+      return ipcPutStrategyEdit(body, solutionId);
     }
     const { response, data } = await this.request(
       "PUT",
@@ -940,8 +966,7 @@ export class EngineClient {
     handIndex?: number,
   ): Promise<unknown> {
     if (isIpcTransport()) {
-      void solutionId;
-      return ipcDeleteStrategyEdit({ nodeId, handIndex });
+      return ipcDeleteStrategyEdit({ nodeId, handIndex, solutionId });
     }
     const query = new URLSearchParams();
     if (nodeId) {
