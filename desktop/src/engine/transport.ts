@@ -215,6 +215,8 @@ export class SolverIpcError extends Error {
   readonly requestId: string | null;
   readonly launchId: string | null;
   readonly degraded: boolean;
+  /** Timeout delivery phase: `before_write` | `after_write` | `reply_wait`. */
+  readonly phase: string | null;
 
   constructor(payload: SolverIpcErrorPayload) {
     super(payload.message);
@@ -225,6 +227,7 @@ export class SolverIpcError extends Error {
     this.requestId = payload.requestId ?? null;
     this.launchId = payload.launchId ?? null;
     this.degraded = payload.degraded === true;
+    this.phase = payload.phase ?? null;
   }
 }
 
@@ -278,18 +281,23 @@ export function parseSolverIpcInvokeError(err: unknown, fallbackOp?: string): So
           : String(err);
   const lower = text.toLowerCase();
   let ipcClass: IpcErrorClass = "protocol_failure";
+  let phase: string | null = null;
   if (lower.includes("connection_loss") || lower.includes("pipe closed") || lower.includes("broken pipe")) {
     ipcClass = "connection_loss";
   } else if (lower.includes("admission saturated") || lower.includes("queued bytes")) {
     ipcClass = "queue_saturation";
   } else if (lower.includes("timed out") || lower.includes("expired-before-write") || lower.includes("unknown-after-write")) {
     ipcClass = "timeout";
+    if (lower.includes("expired-before-write")) phase = "before_write";
+    else if (lower.includes("unknown-after-write")) phase = "after_write";
+    else phase = "reply_wait";
   }
   return new SolverIpcError({
     class: ipcClass,
     message: text,
     op: fallbackOp ?? null,
     degraded: ipcClass === "timeout" && (fallbackOp === "status" || lower.includes("degraded")),
+    phase,
   });
 }
 
