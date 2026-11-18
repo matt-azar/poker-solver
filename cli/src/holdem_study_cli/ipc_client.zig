@@ -121,11 +121,22 @@ pub const SolverClient = struct {
 
     fn waitReadable(file: std.fs.File, timeout_ms: i32) ClientError!void {
         if (builtin.os.tag == .windows) {
+            // Zig 0.14.1 does not bind PeekNamedPipe in std.os.windows.kernel32.
+            const PeekNamedPipe = struct {
+                pub extern "kernel32" fn PeekNamedPipe(
+                    hNamedPipe: std.os.windows.HANDLE,
+                    lpBuffer: ?*anyopaque,
+                    nBufferSize: std.os.windows.DWORD,
+                    lpBytesRead: ?*std.os.windows.DWORD,
+                    lpTotalBytesAvail: ?*std.os.windows.DWORD,
+                    lpBytesLeftThisMessage: ?*std.os.windows.DWORD,
+                ) callconv(std.os.windows.WINAPI) std.os.windows.BOOL;
+            }.PeekNamedPipe;
             // Anonymous pipe: poll is unreliable; peek until data or deadline.
             const deadline = std.time.milliTimestamp() + @as(i64, timeout_ms);
             while (true) {
                 var avail: std.os.windows.DWORD = 0;
-                const ok = std.os.windows.kernel32.PeekNamedPipe(
+                const ok = PeekNamedPipe(
                     file.handle,
                     null,
                     0,
