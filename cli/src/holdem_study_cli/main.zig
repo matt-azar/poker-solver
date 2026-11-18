@@ -129,6 +129,37 @@ fn refuseMissingLine(job: job_json.Job) void {
     std.process.exit(1);
 }
 
+/// Reap the sidecar then exit. `std.process.exit` skips `defer`, so every
+/// fail path after spawn must call this instead of bare exit.
+fn exitReaping(client: *ipc_client.SolverClient, code: u8) noreturn {
+    client.deinit();
+    std.process.exit(code);
+}
+
+fn printHostReject(client: *const ipc_client.SolverClient, what: []const u8) void {
+    const code = client.lastErrorCode() orelse "host_error";
+    const msg = client.lastErrorMessage() orelse "";
+    if (msg.len != 0) {
+        std.debug.print("{s} rejected: error_code={s} error_message={s}\n", .{ what, code, msg });
+    } else {
+        std.debug.print("{s} rejected: error_code={s}\n", .{ what, code });
+    }
+}
+
+fn solveWallTimeoutNs(job: job_json.Job) u64 {
+    // Prefer explicit job time_limit; otherwise bound by iterations with a floor.
+    const from_limit: u64 = if (job.time_limit) |tl| blk: {
+        if (tl <= 0) break :blk 0;
+        const secs: u64 = @intFromFloat(std.math.ceil(tl));
+        break :blk (secs + 30) * std.time.ns_per_s;
+    } else 0;
+    const iters: u64 = if (job.iterations > 0) @intCast(job.iterations) else 1;
+    // 50ms/iter budget + 60s floor for compile/admit; cap 30 minutes.
+    const from_iters = @min(iters * 50 * std.time.ns_per_ms + 60 * std.time.ns_per_s, 30 * std.time.ns_per_min);
+    if (from_limit == 0) return from_iters;
+    return @max(from_limit, 60 * std.time.ns_per_s);
+}
+
 fn validateDecisionOrExit(allocator: std.mem.Allocator, job: job_json.Job) !void {
     refuseMissingLine(job);
     if (job.decision_actions.len == 0) return;
@@ -200,15 +231,29 @@ fn cmdSolve(allocator: std.mem.Allocator, args: []const []const u8, job_path: []
     // Run limits already enforced in loadJob; keep AF-27 decision-path gate.
     try validateDecisionOrExit(allocator, job);
 
-    var client = try ipc_client.SolverClient.spawn(allocator, engine_path, "holdem-study-cli");
+    var client = ipc_client.SolverClient.spawn(allocator, engine_path, "holdem-study-cli") catch |err| {
+        std.debug.print("failed to spawn solver-engine: {s}\n", .{@errorName(err)});
+        std.process.exit(1);
+    };
     defer client.deinit();
 
-    _ = try client.request("ready", "null", null);
+    const wall_timeout_ns = solveWallTimeoutNs(job);
+    const status_poll_timeout_ns: u64 = 8 * std.time.ns_per_s;
+
+    _ = client.requestTimeout("ready", "null", null, 15 * std.time.ns_per_s) catch |err| {
+        if (err == error.HostRejected) printHostReject(&client, "ready");
+        std.debug.print("ready failed: {s}\n", .{@errorName(err)});
+        exitReaping(&client, 1);
+    };
     {
         var begin_body = std.ArrayList(u8).init(allocator);
         defer begin_body.deinit();
         try begin_body.writer().print("{{\"config_text\":{s}}}", .{std.json.fmt(job.street_config, .{})});
-        const begin = try client.request("begin_config", begin_body.items, null);
+        const begin = client.requestTimeout("begin_config", begin_body.items, null, wall_timeout_ns) catch |err| {
+            if (err == error.HostRejected) printHostReject(&client, "begin_config");
+            std.debug.print("begin_config failed: {s}\n", .{@errorName(err)});
+            exitReaping(&client, 1);
+        };
         defer allocator.free(begin);
         if (std.mem.indexOf(u8, begin, "\"ok\":false") != null or
             (std.mem.indexOf(u8, begin, "\"solution_id\"") == null and std.mem.indexOf(u8, begin, "\"accepted\"") == null))
@@ -216,7 +261,7 @@ fn cmdSolve(allocator: std.mem.Allocator, args: []const []const u8, job_path: []
             // begin_config may be async-admit; tolerate accepted / solution_id shapes.
             if (std.mem.indexOf(u8, begin, "\"error_code\"") != null) {
                 std.debug.print("begin_config failed: {s}\n", .{begin});
-                std.process.exit(1);
+                exitReaping(&client, 1);
             }
         }
     }
@@ -234,23 +279,26 @@ fn cmdSolve(allocator: std.mem.Allocator, args: []const []const u8, job_path: []
             try sw.print(",\"time_limit\":{d}", .{tl});
         }
         try sw.writeAll("}");
-        const admit = try client.request("solve", solve_body.items, job_id);
+        const admit = client.requestTimeout("solve", solve_body.items, job_id, 15 * std.time.ns_per_s) catch |err| {
+            if (err == error.HostRejected) printHostReject(&client, "solve");
+            std.debug.print("solve admit failed: {s}\n", .{@errorName(err)});
+            exitReaping(&client, 1);
+        };
         defer allocator.free(admit);
         if (std.mem.indexOf(u8, admit, "\"ok\":false") != null) {
             std.debug.print("solve admit failed: {s}\n", .{admit});
-            std.process.exit(1);
+            exitReaping(&client, 1);
         }
         if (std.mem.indexOf(u8, admit, "\"accepted\":true") == null and
             std.mem.indexOf(u8, admit, "\"running\":true") == null and
             std.mem.indexOf(u8, admit, "\"solution_id\"") == null)
         {
             std.debug.print("solve admit unexpected: {s}\n", .{admit});
-            std.process.exit(1);
+            exitReaping(&client, 1);
         }
     }
 
-    // Poll structured status until idle; distinguish success / failure / timeout.
-    var n: usize = 0;
+    // Poll structured status until idle; wall-clock deadline (not frame count).
     var last_status: []u8 = try allocator.dupe(u8, "{}");
     defer allocator.free(last_status);
     var last_snap: StatusSnapshot = .{
@@ -258,8 +306,17 @@ fn cmdSolve(allocator: std.mem.Allocator, args: []const []const u8, job_path: []
     };
     defer deinitStatus(allocator, &last_snap);
 
-    while (n < 100_000) : (n += 1) {
-        const st = try client.request("status", "null", null);
+    const solve_deadline = std.time.nanoTimestamp() + @as(i128, @intCast(wall_timeout_ns));
+    while (true) {
+        if (std.time.nanoTimestamp() >= solve_deadline) {
+            std.debug.print("solve timed out waiting for idle status\n", .{});
+            exitReaping(&client, 1);
+        }
+        const st = client.requestTimeout("status", "null", null, status_poll_timeout_ns) catch |err| {
+            if (err == error.HostRejected) printHostReject(&client, "status");
+            std.debug.print("status failed: {s}\n", .{@errorName(err)});
+            exitReaping(&client, 1);
+        };
         allocator.free(last_status);
         last_status = st;
 
@@ -279,16 +336,12 @@ fn cmdSolve(allocator: std.mem.Allocator, args: []const []const u8, job_path: []
         std.Thread.sleep(20 * std.time.ns_per_ms);
     }
 
-    if (last_snap.running) {
-        std.debug.print("solve timed out waiting for idle status\n", .{});
-        std.process.exit(1);
-    }
     if (solveOutcomeFailed(last_snap)) {
         std.debug.print(
             "solve failed terminal={s} last_error={s}\n",
             .{ last_snap.terminal_reason, last_snap.last_error orelse "" },
         );
-        std.process.exit(1);
+        exitReaping(&client, 1);
     }
     // Successful completion includes completed / accuracy_reached / time_limit_reached.
     // time_limit_reached still produces a usable checkpoint — save it.
@@ -297,11 +350,15 @@ fn cmdSolve(allocator: std.mem.Allocator, args: []const []const u8, job_path: []
         var save_body = std.ArrayList(u8).init(allocator);
         defer save_body.deinit();
         try save_body.writer().print("{{\"path\":{s}}}", .{std.json.fmt(out_path, .{})});
-        const saved = try client.request("save", save_body.items, null);
+        const saved = client.requestTimeout("save", save_body.items, null, 60 * std.time.ns_per_s) catch |err| {
+            if (err == error.HostRejected) printHostReject(&client, "save");
+            std.debug.print("save failed: {s}\n", .{@errorName(err)});
+            exitReaping(&client, 1);
+        };
         defer allocator.free(saved);
         if (std.mem.indexOf(u8, saved, "\"saved\":true") == null) {
             std.debug.print("save failed: {s}\n", .{saved});
-            std.process.exit(1);
+            exitReaping(&client, 1);
         }
     }
 

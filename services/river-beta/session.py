@@ -128,32 +128,35 @@ class RiverSession:
     ) -> dict[str, Any]:
         if op not in ALLOWED_IPC_OPS:
             raise SessionError("op_forbidden", f"op {op!r} is not allowed in river beta")
+        # Narrow lock: only touch/start under the session mutex. Long analysis
+        # replies must not exclude concurrent status/cancel on this session —
+        # demux lives in SolverSidecar.
         with self._mu:
             self.touch()
             if not self._started:
                 self.start()
-            try:
-                if op == "begin_config":
-                    return self._begin_config(body, job_id=job_id, timeout_s=timeout_s)
-                if op in ("solve", "resolve_locked"):
-                    return self._train(op, body, job_id=job_id, timeout_s=timeout_s)
-                if op in ("cancel", "pause"):
-                    return self._control(op, job_id=job_id, timeout_s=timeout_s)
-                env = self._sidecar.request(
-                    op, body, job_id=job_id, timeout_s=timeout_s, expect_ok=False
-                )
-                self.metrics.sample_pid(self._sidecar.pid)
-                return env
-            except BoundsError as exc:
-                self.metrics.last_error = exc.message
-                raise SessionError(exc.code, exc.message) from exc
-            except IpcError as exc:
-                self.metrics.last_error = str(exc)
-                self.metrics.sample_pid(self._sidecar.pid)
-                # Surface host error envelopes when present.
-                if exc.envelope:
-                    return exc.envelope
-                raise SessionError(exc.code, str(exc)) from exc
+        try:
+            if op == "begin_config":
+                return self._begin_config(body, job_id=job_id, timeout_s=timeout_s)
+            if op in ("solve", "resolve_locked"):
+                return self._train(op, body, job_id=job_id, timeout_s=timeout_s)
+            if op in ("cancel", "pause"):
+                return self._control(op, job_id=job_id, timeout_s=timeout_s)
+            env = self._sidecar.request(
+                op, body, job_id=job_id, timeout_s=timeout_s, expect_ok=False
+            )
+            self.metrics.sample_pid(self._sidecar.pid)
+            return env
+        except BoundsError as exc:
+            self.metrics.last_error = exc.message
+            raise SessionError(exc.code, exc.message) from exc
+        except IpcError as exc:
+            self.metrics.last_error = str(exc)
+            self.metrics.sample_pid(self._sidecar.pid)
+            # Surface host error envelopes when present.
+            if exc.envelope:
+                return exc.envelope
+            raise SessionError(exc.code, str(exc)) from exc
 
     def _begin_config(
         self,
@@ -219,7 +222,8 @@ class RiverSession:
     ) -> dict[str, Any]:
         params = clamp_solve_params(body if isinstance(body, dict) else {}, self.bounds)
         jid = job_id or f"job-{uuid.uuid4().hex[:12]}"
-        self.active_job_id = jid
+        with self._mu:
+            self.active_job_id = jid
         started = time.perf_counter()
         env = self._sidecar.request(
             op,
@@ -241,7 +245,8 @@ class RiverSession:
         timeout_s: float,
     ) -> dict[str, Any]:
         # Job-scoped: never cancel an unknown / stale id (AGENT_LESSONS).
-        jid = job_id or self.active_job_id
+        with self._mu:
+            jid = job_id or self.active_job_id
         if not jid:
             return {
                 "v": 2,

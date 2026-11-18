@@ -3,6 +3,12 @@
 
 Mirrors `scripts/zig/study-contract-smoke.py` framing. One process, one
 session — demux by request_id with a background reader thread.
+
+Framing rules (audit §8 / IPC-7):
+- Exact-read and write-all loops (never assume one read/write completes a
+  header, body, or frame).
+- Only active request IDs are tracked; late/unknown replies are discarded.
+- Close and reader failure wake every waiter.
 """
 
 from __future__ import annotations
@@ -15,11 +21,12 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, BinaryIO, Callable
 
 
 ROOT = Path(__file__).resolve().parents[2]
 PROTOCOL = 2
+MAX_FRAME_BYTES = 64 * 1024 * 1024
 
 
 class IpcError(RuntimeError):
@@ -72,20 +79,51 @@ def encode_frame(
     return struct.pack("<I", len(payload)) + payload
 
 
-def _read_one_frame(stdout) -> dict[str, Any]:
-    hdr = stdout.read(4)
-    if not hdr or len(hdr) < 4:
-        raise IpcError("solver-engine pipe closed (no length prefix)", code="pipe_closed")
+def read_exact(stream: BinaryIO, n: int) -> bytes:
+    """Read exactly ``n`` bytes, looping across short reads."""
+    if n <= 0:
+        return b""
+    chunks: list[bytes] = []
+    remaining = n
+    while remaining > 0:
+        chunk = stream.read(remaining)
+        if not chunk:
+            raise IpcError(
+                "solver-engine pipe closed (short read)",
+                code="pipe_closed",
+            )
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def write_all(stream: BinaryIO, data: bytes) -> None:
+    """Write all bytes, looping across short writes."""
+    view = memoryview(data)
+    while len(view) > 0:
+        n = stream.write(view)
+        if n is None:
+            # Non-blocking stream with no progress — treat as failure.
+            raise IpcError("solver-engine stdin write returned None", code="broken_pipe")
+        if n == 0:
+            raise IpcError("solver-engine stdin short write (0)", code="broken_pipe")
+        view = view[n:]
+
+
+def read_one_frame(stdout: BinaryIO) -> dict[str, Any]:
+    hdr = read_exact(stdout, 4)
     (n,) = struct.unpack("<I", hdr)
-    if n <= 0 or n > 64 * 1024 * 1024:
+    if n <= 0 or n > MAX_FRAME_BYTES:
         raise IpcError(f"invalid frame length {n}", code="bad_frame")
-    payload = stdout.read(n)
-    if not payload or len(payload) < n:
-        raise IpcError("solver-engine pipe closed (truncated)", code="pipe_closed")
+    payload = read_exact(stdout, n)
     env = json.loads(payload)
     if not isinstance(env, dict):
         raise IpcError("frame JSON must be an object", code="bad_frame")
     return env
+
+
+# Back-compat alias for callers/tests that imported the private name.
+_read_one_frame = read_one_frame
 
 
 class SolverSidecar:
@@ -104,6 +142,8 @@ class SolverSidecar:
         self._proc: subprocess.Popen[bytes] | None = None
         self._lock = threading.Lock()
         self._cv = threading.Condition(self._lock)
+        # Active waiters only — late replies for unknown IDs are discarded.
+        self._waiters: set[str] = set()
         self._pending: dict[str, dict[str, Any]] = {}
         self._reader: threading.Thread | None = None
         self._stderr_thread: threading.Thread | None = None
@@ -142,6 +182,7 @@ class SolverSidecar:
     def close(self) -> None:
         with self._lock:
             self._closed = True
+            # Wake every waiter so close cannot hang behind a long timeout.
             self._cv.notify_all()
         proc = self._proc
         self._proc = None
@@ -183,23 +224,33 @@ class SolverSidecar:
                     f"sidecar closed: {self._reader_error}",
                     code="session_dead",
                 )
-            self._proc.stdin.write(frame)
-            self._proc.stdin.flush()
+            self._waiters.add(request_id)
+            try:
+                write_all(self._proc.stdin, frame)
+                self._proc.stdin.flush()
+            except Exception:
+                self._waiters.discard(request_id)
+                self._pending.pop(request_id, None)
+                raise
             deadline = time.monotonic() + timeout_s
-            while request_id not in self._pending:
-                if self._reader_error is not None:
-                    raise IpcError(
-                        f"sidecar reader failed: {self._reader_error}",
-                        code="session_dead",
-                    )
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise IpcError(
-                        f"timeout waiting for op={op!r} request_id={request_id}",
-                        code="timeout",
-                    )
-                self._cv.wait(timeout=remaining)
-            env = self._pending.pop(request_id)
+            try:
+                while request_id not in self._pending:
+                    if self._closed or self._reader_error is not None:
+                        raise IpcError(
+                            f"sidecar closed: {self._reader_error}",
+                            code="session_dead",
+                        )
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise IpcError(
+                            f"timeout waiting for op={op!r} request_id={request_id}",
+                            code="timeout",
+                        )
+                    self._cv.wait(timeout=remaining)
+                env = self._pending.pop(request_id)
+            finally:
+                self._waiters.discard(request_id)
+                self._pending.pop(request_id, None)
         if expect_ok and not env.get("ok", False):
             raise IpcError(
                 env.get("error_message") or env.get("error_code") or "request failed",
@@ -212,7 +263,7 @@ class SolverSidecar:
         assert self._proc is not None and self._proc.stdout is not None
         try:
             while True:
-                env = _read_one_frame(self._proc.stdout)
+                env = read_one_frame(self._proc.stdout)
                 kind = env.get("kind")
                 if kind == "progress":
                     continue
@@ -222,8 +273,10 @@ class SolverSidecar:
                 if not isinstance(rid, str):
                     continue
                 with self._lock:
-                    self._pending[rid] = env
-                    self._cv.notify_all()
+                    # Discard late / unknown replies — only active waiters count.
+                    if rid in self._waiters:
+                        self._pending[rid] = env
+                        self._cv.notify_all()
         except BaseException as exc:
             with self._lock:
                 self._reader_error = exc
