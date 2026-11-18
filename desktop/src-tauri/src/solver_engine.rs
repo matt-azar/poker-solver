@@ -267,7 +267,7 @@ fn resolve_sidecar(app: &AppHandle) -> Result<PathBuf, String> {
 
 fn encode_frame(envelope: &Value) -> Result<Vec<u8>, String> {
     let payload = serde_json::to_vec(envelope).map_err(|err| format!("encode ipc json: {err}"))?;
-    if payload.len() > 16 * 1024 * 1024 {
+    if payload.len() > solver_ipc::MAX_PAYLOAD_BYTES {
         return Err("ipc frame too large".into());
     }
     let mut frame = Vec::with_capacity(4 + payload.len());
@@ -292,7 +292,7 @@ fn read_frame_blocking(stdout: &mut ChildStdout, stash: &mut Vec<u8>) -> Result<
     let mut len_bytes = [0u8; 4];
     len_bytes.copy_from_slice(&stash[..4]);
     let len = u32::from_le_bytes(len_bytes) as usize;
-    if len == 0 || len > 16 * 1024 * 1024 {
+    if len == 0 || len > solver_ipc::MAX_PAYLOAD_BYTES {
         return Err(format!("invalid ipc frame length {len}"));
     }
     while stash.len() < 4 + len {
