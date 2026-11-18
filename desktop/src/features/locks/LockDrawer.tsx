@@ -8,6 +8,8 @@ import {
   comboProbsRowsForHands,
   formatProbPct,
   isHandLocked,
+  lockAffectedComboCount,
+  lockDraftIsDirty,
   lockForNode,
   normalizeProbs,
   weightedStrategyMix,
@@ -22,6 +24,7 @@ import {
   nodeIndicesForCell,
   type LockHighlightFilter,
 } from "./LockPaintPanel";
+import "../../styles/locks.css";
 
 function playerLabel(player: number | null | undefined, toAct?: string | null): string {
   if (toAct) {
@@ -34,6 +37,16 @@ function playerLabel(player: number | null | undefined, toAct?: string | null): 
     return "IP";
   }
   return "—";
+}
+
+function formatBoard(board: string[] | string | null | undefined): string {
+  if (!board) {
+    return "—";
+  }
+  if (typeof board === "string") {
+    return board.trim() || "—";
+  }
+  return board.filter(Boolean).join(" ") || "—";
 }
 
 function StrategyBar({
@@ -77,7 +90,7 @@ function StrategyBar({
 /**
  * Dedicated Pio-style Node Locking workspace.
  * Full-screen modal: strategy-colored 13×13 paint grid, frequency sliders,
- * overall/selected strategy bars, and Save & Close.
+ * overall/selected strategy bars, and Apply / Discard / Apply and re-solve.
  */
 export function LockDrawer() {
   const open = useStudyStore((s) => s.lockDrawerOpen);
@@ -85,13 +98,17 @@ export function LockDrawer() {
   const currentNode = useStudyStore((s) => s.currentNode);
   const locks = useStudyStore((s) => s.locks);
   const lockDraft = useStudyStore((s) => s.lockDraft);
+  const lockDraftBaseline = useStudyStore((s) => s.lockDraftBaseline);
+  const lockScope = useStudyStore((s) => s.lockScope);
+  const setLockScope = useStudyStore((s) => s.setLockScope);
   const setLockKind = useStudyStore((s) => s.setLockKind);
   const setLockProbLinked = useStudyStore((s) => s.setLockProbLinked);
   const seedLockFromStrategy = useStudyStore((s) => s.seedLockFromStrategy);
-  const revertLockDraft = useStudyStore((s) => s.revertLockDraft);
+  const discardLockDraft = useStudyStore((s) => s.discardLockDraft);
   const clearLockSelection = useStudyStore((s) => s.clearLockSelection);
   const selectAllCombosForLock = useStudyStore((s) => s.selectAllCombosForLock);
   const applyLock = useStudyStore((s) => s.applyLock);
+  const applyLockAndResolve = useStudyStore((s) => s.applyLockAndResolve);
   const lockAllHands = useStudyStore((s) => s.lockAllHands);
   const unlockHands = useStudyStore((s) => s.unlockHands);
   const unlockNode = useStudyStore((s) => s.unlockNode);
@@ -104,6 +121,9 @@ export function LockDrawer() {
   const baselineSolutionId = useStudyStore((s) => s.baselineSolutionId);
   const message = useStudyStore((s) => s.message);
   const phase = useStudyStore((s) => s.phase);
+  const setStrategyEditDrawerOpen = useStudyStore(
+    (s) => s.setStrategyEditDrawerOpen,
+  );
 
   const [highlight, setHighlight] = useState<LockHighlightFilter>("all");
   const [focus, setFocus] = useState<{
@@ -113,6 +133,7 @@ export function LockDrawer() {
   } | null>(null);
   /** Pio: checkbox beside slider — protected actions are not donors/recipients. */
   const [protectedActions, setProtectedActions] = useState<boolean[]>([]);
+  const [commitBusy, setCommitBusy] = useState(false);
 
   const actions = currentNode?.actions ?? [];
   const combos = currentNode?.combos;
@@ -131,6 +152,11 @@ export function LockDrawer() {
 
   const normalized = useMemo(() => normalizeProbs(lockDraft.probs), [lockDraft.probs]);
   const rawSum = normalized.sum;
+  const dirty = lockDraftIsDirty(lockDraft, lockDraftBaseline);
+  const affectedCount = lockAffectedComboCount(
+    lockDraft,
+    combos?.length ?? 0,
+  );
 
   const allIndices = useMemo(
     () => (combos ? combos.map((_, index) => index) : []),
@@ -150,26 +176,30 @@ export function LockDrawer() {
     [currentNode?.strategy, currentNode?.marginal, allIndices, actions.length],
   );
 
-  const selectedMix = useMemo(() => {
-    if (lockDraft.kind === "full") {
-      return overallMix;
+  const appliedMix = useMemo(() => {
+    const baseline = lockDraftBaseline;
+    if (!baseline) {
+      return null;
     }
-    return weightedStrategyMix(
-      currentNode?.strategy ?? null,
-      lockDraft.handIndices,
-      actions.length,
-      Array.isArray(currentNode?.marginal)
-        ? (currentNode.marginal as number[])
-        : null,
+    const handIndices =
+      baseline.kind === "full" && combos?.length
+        ? combos.map((_, index) => index)
+        : baseline.handIndices;
+    const rows = comboProbsRowsForHands(
+      baseline.comboProbsByHand,
+      handIndices,
     );
-  }, [
-    lockDraft.kind,
-    lockDraft.handIndices,
-    currentNode?.strategy,
-    currentNode?.marginal,
-    actions.length,
-    overallMix,
-  ]);
+    if (rows && actions.length > 0) {
+      return weightedStrategyMix(
+        rows,
+        handIndices.map((_, index) => index),
+        actions.length,
+        null,
+      );
+    }
+    const norm = normalizeProbs(baseline.probs);
+    return norm.valid ? norm.probs : null;
+  }, [lockDraftBaseline, combos, actions.length]);
 
   const draftMix = useMemo(() => {
     const handIndices =
@@ -223,22 +253,47 @@ export function LockDrawer() {
       .filter((entry): entry is NonNullable<typeof entry> => entry != null);
   }, [focus, currentNode, nodeLock]);
 
-  const busy = phase === "solving" || phase === "building";
+  const busy = phase === "solving" || phase === "building" || commitBusy;
   const canApply =
     Boolean(currentNode && currentNode.kind === "decision") &&
     normalized.valid &&
     (lockDraft.kind === "full" || lockDraft.handIndices.length > 0);
 
-  const saveAndClose = async () => {
-    const ok = await applyLock();
-    if (ok) {
-      setLockDrawerOpen(false);
+  const onDiscard = () => {
+    discardLockDraft();
+  };
+
+  const onCancel = () => {
+    setLockDrawerOpen(false);
+  };
+
+  const onApply = async () => {
+    setCommitBusy(true);
+    try {
+      await applyLock(lockScope);
+    } finally {
+      setCommitBusy(false);
+    }
+  };
+
+  const onApplyAndResolve = async () => {
+    setCommitBusy(true);
+    try {
+      await applyLockAndResolve(lockScope);
+    } finally {
+      setCommitBusy(false);
     }
   };
 
   if (!open) {
     return null;
   }
+
+  const board = formatBoard(currentNode?.board);
+  const line =
+    typeof currentNode?.line === "string" && currentNode.line.trim()
+      ? currentNode.line
+      : currentNode?.node_id ?? "—";
 
   return (
     <div className="node-lock-overlay" role="presentation">
@@ -254,34 +309,34 @@ export function LockDrawer() {
             <p className="node-lock-workspace__node muted">
               {currentNode ? (
                 <>
-                  <code>{currentNode.node_id}</code>
-                  <span>
-                    {" "}
-                    · {playerLabel(currentNode.player, currentNode.to_act)}
-                    {currentNode.kind ? ` · ${currentNode.kind}` : ""}
+                  <span className="node-lock-context">
+                    <span className="node-lock-context__label">Board</span>{" "}
+                    <span className="tabular">{board}</span>
+                  </span>
+                  <span className="node-lock-context">
+                    <span className="node-lock-context__label">Line</span> {line}
+                  </span>
+                  <span className="node-lock-context">
+                    <span className="node-lock-context__label">Actor</span>{" "}
+                    {playerLabel(currentNode.player, currentNode.to_act)}
                   </span>
                 </>
               ) : (
                 "No node loaded"
               )}
             </p>
+            <p className="node-lock-workspace__note muted">
+              Re-solve constraint — not a session strategy edit.
+            </p>
           </div>
           <div className="node-lock-workspace__header-actions">
             <button
               type="button"
               className="toolbar-btn"
-              onClick={() => setLockDrawerOpen(false)}
+              onClick={onCancel}
+              title="Discard unapplied draft and close"
             >
               Cancel
-            </button>
-            <button
-              type="button"
-              className="toolbar-btn primary"
-              disabled={!canApply}
-              onClick={() => void saveAndClose()}
-              title="Apply the lock constraint and close"
-            >
-              Save &amp; Close
             </button>
           </div>
         </header>
@@ -305,6 +360,24 @@ export function LockDrawer() {
                   onClick={() => setLockKind("full")}
                 >
                   Full node
+                </button>
+              </div>
+              <div className="lock-kind-toggle" role="group" aria-label="Lock scope">
+                <button
+                  type="button"
+                  className="toolbar-btn"
+                  data-active={lockScope === "node" ? "true" : "false"}
+                  onClick={() => setLockScope("node")}
+                >
+                  This board
+                </button>
+                <button
+                  type="button"
+                  className="toolbar-btn"
+                  data-active={lockScope === "line" ? "true" : "false"}
+                  onClick={() => setLockScope("line")}
+                >
+                  All runouts
                 </button>
               </div>
               <div className="lock-kind-toggle" role="group" aria-label="Highlight">
@@ -331,6 +404,7 @@ export function LockDrawer() {
                 {lockDraft.kind === "full"
                   ? `Full · ${combos?.length ?? 0} hands`
                   : `${lockDraft.handIndices.length} selected`}
+                {dirty ? " · draft" : ""}
               </span>
             </div>
             <LockPaintPanel highlight={highlight} onFocusChange={setFocus} />
@@ -379,13 +453,13 @@ export function LockDrawer() {
               colors={colors.byIndex}
             />
             <StrategyBar
-              label="Selected range"
-              mix={selectedMix}
+              label="Applied frequencies"
+              mix={appliedMix}
               actions={actions}
               colors={colors.byIndex}
             />
             <StrategyBar
-              label="Draft lock frequencies"
+              label="Proposed frequencies"
               mix={draftMix}
               actions={actions}
               colors={colors.byIndex}
@@ -473,6 +547,52 @@ export function LockDrawer() {
             </section>
 
             <section
+              className="lock-drawer__section lock-drawer__commit"
+              aria-label="Apply lock"
+            >
+              <div className="lock-drawer__section-title">
+                Commit{" "}
+                <span className="muted tabular">
+                  ({affectedCount} combo{affectedCount === 1 ? "" : "s"} ·{" "}
+                  {lockScope === "line" ? "all runouts" : "this board"})
+                </span>
+              </div>
+              <div className="lock-drawer__actions">
+                <button
+                  type="button"
+                  className="toolbar-btn primary"
+                  disabled={!canApply || busy}
+                  onClick={() => void onApply()}
+                  title="Apply the draft lock constraint"
+                >
+                  Apply lock
+                </button>
+                <button
+                  type="button"
+                  className="toolbar-btn primary"
+                  disabled={
+                    !canApply ||
+                    busy ||
+                    !studyIpcFeatureAvailable("resolveLocked")
+                  }
+                  onClick={() => void onApplyAndResolve()}
+                  title="Apply the draft, then resolve locked"
+                >
+                  Apply and re-solve
+                </button>
+                <button
+                  type="button"
+                  className="toolbar-btn"
+                  disabled={!dirty || busy}
+                  onClick={onDiscard}
+                  title="Restore the last applied lock frequencies"
+                >
+                  Discard changes
+                </button>
+              </div>
+            </section>
+
+            <section
               className="lock-drawer__section lock-drawer__actions"
               aria-label="Selection actions"
             >
@@ -483,34 +603,14 @@ export function LockDrawer() {
               >
                 Seed from strategy
               </button>
-              <button type="button" className="toolbar-btn" onClick={() => revertLockDraft()}>
-                Revert draft
-              </button>
-              <button
-                type="button"
-                className="toolbar-btn primary"
-                onClick={() => void applyLock("node")}
-                disabled={!canApply}
-                title="Lock selected hands on this board only"
-              >
-                Lock selected
-              </button>
-              <button
-                type="button"
-                className="toolbar-btn"
-                onClick={() => void applyLock("line")}
-                disabled={!canApply}
-                title="Lock selected hands on every runout of this betting line"
-              >
-                Lock selected on line
-              </button>
               <button
                 type="button"
                 className="toolbar-btn"
                 onClick={() => void unlockHands()}
-                disabled={lockDraft.handIndices.length === 0}
+                disabled={lockDraft.handIndices.length === 0 || busy}
+                title="Takes effect immediately"
               >
-                Unlock selected
+                Unlock selected (now)
               </button>
               <button
                 type="button"
@@ -532,42 +632,39 @@ export function LockDrawer() {
                   type="button"
                   className="toolbar-btn"
                   onClick={() => {
-                    void lockAllHands("node");
+                    void lockAllHands(lockScope);
                   }}
-                  disabled={!currentNode || currentNode.kind !== "decision"}
-                  title="Freeze every combo's current mix on this board only"
+                  disabled={!currentNode || currentNode.kind !== "decision" || busy}
+                  title="Freeze every combo's current mix"
                 >
                   Lock all hands
                 </button>
                 <button
                   type="button"
                   className="toolbar-btn"
-                  onClick={() => {
-                    void lockAllHands("line");
-                  }}
-                  disabled={!currentNode || currentNode.kind !== "decision"}
-                  title="Freeze each runout's own mix across this betting line"
+                  onClick={() => void unlockNode()}
+                  disabled={busy}
+                  title="Takes effect immediately"
                 >
-                  Lock line across runouts
+                  Unlock node (now)
                 </button>
                 <button
                   type="button"
                   className="toolbar-btn"
                   onClick={() => void unlockLine()}
-                  disabled={!currentNode || currentNode.kind !== "decision"}
-                  title="Clear every runout lock created by Lock line across runouts"
+                  disabled={!currentNode || currentNode.kind !== "decision" || busy}
+                  title="Takes effect immediately — clears line-wide runout locks"
                 >
-                  Unlock line across runouts
-                </button>
-                <button type="button" className="toolbar-btn" onClick={() => void unlockNode()}>
-                  Unlock node
+                  Unlock line (now)
                 </button>
                 <button
                   type="button"
                   className="toolbar-btn danger"
                   onClick={() => void clearAllLocks()}
+                  disabled={busy}
+                  title="Takes effect immediately"
                 >
-                  Clear all locks
+                  Clear all locks (now)
                 </button>
               </div>
             </section>
@@ -591,7 +688,7 @@ export function LockDrawer() {
               <div className="lock-drawer__actions">
                 <button
                   type="button"
-                  className="toolbar-btn primary"
+                  className="toolbar-btn"
                   disabled={
                     busy ||
                     !currentNode ||
@@ -600,7 +697,9 @@ export function LockDrawer() {
                   title={
                     !studyIpcFeatureAvailable("resolveLocked")
                       ? studyIpcUnavailableReason("resolveLocked")
-                      : undefined
+                      : dirty
+                        ? "Applies the draft lock first, then resolves"
+                        : undefined
                   }
                   onClick={() => void resolveLocked()}
                 >
@@ -626,6 +725,24 @@ export function LockDrawer() {
               </div>
             </section>
 
+            <section className="lock-drawer__section" aria-label="Session strategy edit">
+              <div className="lock-drawer__section-title">Session strategy edit</div>
+              <p className="empty-hint">
+                Free-form stored-strategy edits without a re-solve constraint.
+              </p>
+              <button
+                type="button"
+                className="toolbar-btn"
+                disabled={!studyIpcFeatureAvailable("strategyEdits")}
+                onClick={() => {
+                  setLockDrawerOpen(false);
+                  setStrategyEditDrawerOpen(true);
+                }}
+              >
+                Open session strategy edit
+              </button>
+            </section>
+
             <section className="lock-drawer__section" aria-label="Existing locks">
               <div className="lock-drawer__section-title">
                 Locks on solution{" "}
@@ -644,9 +761,9 @@ export function LockDrawer() {
                         : String(entry.hand_indices?.length ?? 0);
                     const scopeLabel =
                       entry.scope === "line"
-                        ? "line"
+                        ? "all runouts"
                         : entry.scope === "node"
-                          ? "node"
+                          ? "this board"
                           : null;
                     return (
                       <li

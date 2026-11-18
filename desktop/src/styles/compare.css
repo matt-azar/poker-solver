@@ -1,0 +1,88 @@
+/* Compare workspace extras (action summary + compact hand table).
+ * Base .compare-* layout rules remain in layout.css. */
+
+.compare-header__lead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+.compare-context-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.compare-context-block--grow {
+  flex: 1 1 180px;
+}
+
+.compare-context-value {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.compare-action-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.compare-action-table {
+  width: 100%;
+  max-width: 420px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.compare-action-table th,
+.compare-action-table td {
+  padding: 4px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.compare-action-table th.compare-num,
+.compare-action-table td.compare-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.compare-details {
+  font-size: 12px;
+}
+
+.compare-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.compare-action-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.compare-action-tabs .toolbar-btn[data-active="true"] {
+  border-color: var(--accent, var(--border-strong, var(--border)));
+  background: var(--secondary);
+}
+
+.compare-table--compact {
+  width: max-content;
+  min-width: 100%;
+}
+
+.compare-empty__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  justify-content: center;
+}

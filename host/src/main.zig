@@ -12,6 +12,7 @@ const workers = @import("workers.zig");
 const equity_json = @import("equity_json.zig");
 const equity_jobs = @import("equity_jobs.zig");
 const locks_json = @import("locks_json.zig");
+const compare_json = @import("compare_json.zig");
 const strategy_edits_json = @import("strategy_edits_json.zig");
 
 pub const sidecar_name = "solver-engine";
@@ -249,6 +250,7 @@ test {
     _ = workers;
     _ = equity_json;
     _ = locks_json;
+    _ = compare_json;
     _ = strategy_edits_json;
     _ = linkedLayers;
 }
