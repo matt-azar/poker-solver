@@ -72,6 +72,18 @@ jobs:
         working-directory: desktop/ipc-test-sidecar
         run: cargo build --release
 
+      # Tauri build.rs requires externalBin to exist even for `cargo test --lib`.
+      # Lib tests use ipc-test-sidecar via env; this file is only a path placeholder.
+      - name: Placeholder solver-engine for Tauri externalBin
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path desktop/src-tauri/binaries | Out-Null
+          $path = "desktop/src-tauri/binaries/solver-engine-x86_64-pc-windows-msvc.exe"
+          if (-not (Test-Path $path)) {
+            New-Item -ItemType File -Force -Path $path | Out-Null
+          }
+
       - name: Rust supervisor tests (solver_engine module)
         working-directory: desktop/src-tauri
         run: "cargo test --lib solver_engine:: -- --nocapture"
@@ -131,6 +143,18 @@ jobs:
       - name: Build ipc-test-sidecar
         working-directory: desktop/ipc-test-sidecar
         run: cargo build --release
+
+      # Tauri build.rs requires externalBin to exist even for `cargo test --lib`.
+      # Lib tests use ipc-test-sidecar via env; this file is only a path placeholder.
+      - name: Placeholder solver-engine for Tauri externalBin
+        run: |
+          set -euo pipefail
+          mkdir -p desktop/src-tauri/binaries
+          path=desktop/src-tauri/binaries/solver-engine-x86_64-unknown-linux-gnu
+          if [[ ! -e "$path" ]]; then
+            : >"$path"
+            chmod +x "$path"
+          fi
 
       - name: Rust supervisor tests (solver_engine module)
         working-directory: desktop/src-tauri
