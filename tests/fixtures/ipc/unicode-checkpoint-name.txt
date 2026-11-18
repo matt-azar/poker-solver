@@ -1,0 +1,3 @@
+# Canonical UTF-8 checkpoint basename from IPC audit §6 (U+1F0A1 Ace of Spades).
+# JSON surrogate-pair form of the same string: Turn-\uD83C\uDCA1.psol
+Turn-🂡.psol
