@@ -48,11 +48,11 @@ When recording store scoreboard rows (optional; not required for cutover):
 | Workflow | Role |
 | --- | --- |
 | `.github/workflows/zig.yml` | Linux + Windows `zig build` / `zig build test` + ready smoke + Study contract smoke (`scripts/zig/study-contract-smoke.py`, river fixture, ≤60s) + Linux overlap-actions smoke (`scripts/zig/study-overlap-actions-smoke.py`, ZR-152); Windows pins `-Dcpu=x86_64_v2`. Windows packaged Study overlap waits for ma1pc (ZR-147). |
-| `.github/workflows/windows-installer.yml` | Shipping NSIS. `externalBin` is Zig `solver-engine`. `windows-installer-e2e` Stage A (install + WebView drive) then Stage B (river clear-then-reopen PSOL). |
+| `.github/workflows/windows-installer.yml` | Shipping NSIS. `externalBin` is Zig `solver-engine`. `windows-installer-e2e` Stage A (install + WebView drive), Stage B (river clear-then-reopen PSOL), Stage DelayedReply (packaged WebView concurrency via `ipc-async-acceptance.ps1`). |
 | `.github/workflows/windows-installer-release.yml` | Tag-triggered release wrapper that reuses `windows-installer.yml` |
 | `.github/workflows/ci.yml` | Desktop Vitest, `tsc`, and build |
 | `.github/workflows/public-demo-pages.yml` | Precomputed public Study demo build, Playwright (desktop + phone), deploy `desktop/dist-public-demo` |
-| `.github/workflows/ipc-race-probes.yml` | Hold-EV probe: Status + Cancel while values are withheld |
+| `.github/workflows/ipc-race-probes.yml` | Hold-EV probe + Rust `solver_engine::` supervisor tests; path filters cover production supervisor / Zig dispatch / TS transport |
 
 Stable Study ships Zig typed IPC after owner GO (2026-11-12).
 The installer packages `solver-engine`.

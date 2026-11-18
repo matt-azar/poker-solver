@@ -4,13 +4,14 @@
 //! Persists sidecar stderr, last-fault snapshots, and session meta under a
 //! single folder the user can zip and share. No remote upload.
 
+use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const PRODUCT_DIR: &str = "Holdem Study";
@@ -18,6 +19,7 @@ const DIAGNOSTICS_SUBDIR: &str = "diagnostics";
 const ENGINE_LOG: &str = "engine.log";
 const LAST_FAULT: &str = "last-fault.json";
 const LAST_SOLVE: &str = "last-solve.json";
+const LAST_LAUNCH_IPC: &str = "last-launch-ipc.json";
 const HOST_RESOURCES: &str = "host-resources.json";
 const UI_HANG_EVENTS: &str = "ui-hang-events.json";
 const SESSION_META: &str = "session-meta.json";
@@ -27,7 +29,27 @@ const OVERRIDE_ENV: &str = "HOLDEM_STUDY_DIAGNOSTICS_DIR";
 const ENGINE_LOG_MAX_BYTES: u64 = 2 * 1024 * 1024;
 /// Cap for temporary UI-unresponsiveness evidence (ZR-173).
 const UI_HANG_EVENTS_MAX: usize = 32;
+/// Cap on retained IPC timing samples per launch (matches live SessionIo ring).
+pub const LAUNCH_IPC_RING_CAP: usize = 64;
 const UI_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Canonical outcome labels for the last-launch IPC ring.
+///
+/// Host `ok:false` must use [`ipc_outcome::ENGINE_REJECTION`], never `"ok"`.
+/// Extra labels are for `solver_engine` / `solver_ipc` hooks (not wired yet).
+#[allow(dead_code)]
+pub mod ipc_outcome {
+    pub const OK: &str = "ok";
+    /// Zig/host replied with a validated envelope where `ok` is false.
+    pub const ENGINE_REJECTION: &str = "engine_rejection";
+    pub const WROTE: &str = "wrote";
+    pub const TIMEOUT: &str = "timeout";
+    pub const DEGRADED_TIMEOUT: &str = "degraded_timeout";
+    pub const UNKNOWN_AFTER_WRITE: &str = "unknown_after_write";
+    pub const CONNECTION_LOSS: &str = "connection_loss";
+    pub const PROTOCOL_FAILURE: &str = "protocol_failure";
+    pub const CONNECTION_CLOSED: &str = "connection_closed";
+}
 
 const README_BODY: &str = "\
 Holdem Study diagnostics
@@ -40,12 +62,13 @@ Folder (Windows packaged):
   %LOCALAPPDATA%\\Holdem Study\\diagnostics\\
 
 Contents:
-  engine.log           — recent solver-engine stderr (rolling)
-  last-fault.json      — last Solve failed / session-dead / kill / ensure-fail
-  last-solve.json      — compact parameters of the last Solve (no range blobs)
-  host-resources.json  — best-effort UI/sidecar RSS + system RAM/CPU
-  ui-hang-events.json  — ring of temporary UI unresponsiveness signals
-  session-meta.json    — app version, protocol, launch_id, OS
+  engine.log            — recent solver-engine stderr (rolling)
+  last-fault.json       — last Solve failed / session-dead / kill / ensure-fail
+  last-solve.json       — compact parameters of the last Solve (no range blobs)
+  last-launch-ipc.json  — bounded IPC timing ring from the last launch
+  host-resources.json   — best-effort UI/sidecar RSS + system RAM/CPU
+  ui-hang-events.json   — ring of temporary UI unresponsiveness signals
+  session-meta.json     — app version, protocol, launch_id, OS
 
 Timing:
   Before each Solve / Continue train start, Study writes a cheap pre-solve
@@ -54,6 +77,15 @@ Timing:
   Later fault writes overwrite host-resources with snapshotKind=fault and
   write last-fault.json. Compare timestamps / snapshotKind — do not treat a
   lone pre-solve host-resources file as post-crash state.
+
+last-launch-ipc.json (support across reconnect):
+  The live SessionIo timing ring dies with the connection. On teardown Study
+  freezes a bounded (64) last-launch snapshot so diagnostics/support ZIP is
+  not empty solely because reconnect cleared the live ring. Fields per sample:
+  operation (op), origin, queueWaitMs / writeDurationMs / replyWaitMs when
+  known, childExit when observed, outcome. Snapshot header carries uiVersion
+  and sidecarBuildId. outcome=engine_rejection means host ok:false — not a
+  successful op. Never stores full range text or checkpoint contents.
 
 last-solve.json fields (typical):
   snapshotKind (pre-solve), timestamp, street, board, pot, stack, bet sizes,
@@ -88,14 +120,313 @@ static UI_HANG_LOCK: Mutex<()> = Mutex::new(());
 static LAST_SIDECAR_PID: Mutex<Option<u32>> = Mutex::new(None);
 
 /// Remember / clear the live sidecar PID (spawn / kill).
+///
+/// Clearing (`None`) also freezes the bounded last-launch IPC snapshot so
+/// support ZIP / diagnostics survive reconnect (audit §8).
 pub fn remember_sidecar_pid(pid: Option<u32>) {
     if let Ok(mut slot) = LAST_SIDECAR_PID.lock() {
         *slot = pid;
+    }
+    if pid.is_none() {
+        let _ = preserve_last_launch_snapshot();
     }
 }
 
 fn sidecar_pid_snapshot() -> Option<u32> {
     LAST_SIDECAR_PID.lock().ok().and_then(|g| *g)
+}
+
+// ---------------------------------------------------------------------------
+// Bounded last-launch IPC diagnostics (audit §8 — survive reconnect)
+// ---------------------------------------------------------------------------
+
+/// One bounded IPC timing / outcome sample for the last-launch ring.
+///
+/// Intentionally omits request bodies, range text, and checkpoint contents.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchIpcSample {
+    pub launch_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    /// IPC operation name (`status`, `solve`, `save`, …).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub op: Option<String>,
+    /// Caller origin when known (`ui`, `status-poll`, `ensure`, `watchdog`, …).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub write_duration_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub child_exit: Option<String>,
+    /// See [`ipc_outcome`]. Use `engine_rejection` for host `ok:false`.
+    pub outcome: String,
+}
+
+impl LaunchIpcSample {
+    /// Drop any accidental payload-ish fields callers might have stuffed into
+    /// string slots (ranges / checkpoint paths stay out of this ring).
+    fn sanitize(mut self) -> Self {
+        self.outcome = sanitize_outcome_label(&self.outcome);
+        if let Some(op) = self.op.as_mut() {
+            *op = truncate_diag_token(op, 64);
+        }
+        if let Some(origin) = self.origin.as_mut() {
+            *origin = truncate_diag_token(origin, 64);
+        }
+        if let Some(rid) = self.request_id.as_mut() {
+            *rid = truncate_diag_token(rid, 96);
+        }
+        if let Some(exit) = self.child_exit.as_mut() {
+            *exit = truncate_diag_token(exit, 128);
+        }
+        self
+    }
+}
+
+fn sanitize_outcome_label(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return "unknown".into();
+    }
+    truncate_diag_token(trimmed, 64)
+}
+
+fn truncate_diag_token(raw: &str, max: usize) -> String {
+    let trimmed = raw.trim();
+    if trimmed.len() <= max {
+        return trimmed.to_string();
+    }
+    let mut end = max;
+    while end > 0 && !trimmed.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &trimmed[..end])
+}
+
+/// Classify a validated host reply: `ok:false` is rejection, not success.
+pub fn outcome_for_host_reply(ok: Option<bool>) -> &'static str {
+    match ok {
+        Some(false) => ipc_outcome::ENGINE_REJECTION,
+        Some(true) | None => ipc_outcome::OK,
+    }
+}
+
+/// Frozen last-launch snapshot persisted across teardown / reconnect.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LastLaunchSnapshot {
+    pub schema_version: u32,
+    pub preserved_at: String,
+    pub launch_id: String,
+    pub ui_version: String,
+    /// Sidecar identity / build echo from ready (e.g. `solver-engine`).
+    pub sidecar_build_id: String,
+    pub protocol: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub child_exit: Option<String>,
+    pub samples: Vec<LaunchIpcSample>,
+}
+
+struct LiveLaunchDiag {
+    launch_id: String,
+    protocol: u32,
+    sidecar_build_id: String,
+    child_exit: Option<String>,
+    samples: VecDeque<LaunchIpcSample>,
+}
+
+impl LiveLaunchDiag {
+    fn push(&mut self, sample: LaunchIpcSample) {
+        let sample = sample.sanitize();
+        if self.samples.len() >= LAUNCH_IPC_RING_CAP {
+            self.samples.pop_front();
+        }
+        if let Some(exit) = sample.child_exit.as_ref() {
+            self.child_exit = Some(exit.clone());
+        }
+        if !sample.launch_id.is_empty() {
+            self.launch_id = sample.launch_id.clone();
+        }
+        self.samples.push_back(sample);
+    }
+
+    fn freeze(&self) -> LastLaunchSnapshot {
+        LastLaunchSnapshot {
+            schema_version: 1,
+            preserved_at: iso_timestamp(),
+            launch_id: self.launch_id.clone(),
+            ui_version: UI_VERSION.to_string(),
+            sidecar_build_id: self.sidecar_build_id.clone(),
+            protocol: self.protocol,
+            child_exit: self.child_exit.clone(),
+            samples: self.samples.iter().cloned().collect(),
+        }
+    }
+}
+
+struct LaunchDiagState {
+    live: Option<LiveLaunchDiag>,
+    last: Option<LastLaunchSnapshot>,
+}
+
+impl LaunchDiagState {
+    const fn new() -> Self {
+        Self {
+            live: None,
+            last: None,
+        }
+    }
+}
+
+static LAUNCH_IPC: Mutex<LaunchDiagState> = Mutex::new(LaunchDiagState::new());
+
+fn with_launch_ipc<R>(f: impl FnOnce(&mut LaunchDiagState) -> R) -> Option<R> {
+    match LAUNCH_IPC.lock() {
+        Ok(mut g) => Some(f(&mut g)),
+        Err(poisoned) => Some(f(&mut poisoned.into_inner())),
+    }
+}
+
+/// Start (or replace) the live launch ring after a successful ready handshake.
+///
+/// Called from [`write_session_meta`]. Identity-track follow-up: also call from
+/// `solver_engine` spawn/ready so the header exists even if session-meta write
+/// is skipped.
+pub fn begin_launch_diagnostics(launch_id: &str, protocol: u32, sidecar_build_id: &str) {
+    let _ = with_launch_ipc(|state| {
+        state.live = Some(LiveLaunchDiag {
+            launch_id: launch_id.to_string(),
+            protocol,
+            sidecar_build_id: if sidecar_build_id.trim().is_empty() {
+                "solver-engine".into()
+            } else {
+                truncate_diag_token(sidecar_build_id, 128)
+            },
+            child_exit: None,
+            samples: VecDeque::new(),
+        });
+    });
+}
+
+/// Record one IPC sample into the live launch ring (bounded).
+///
+/// Follow-up in `solver_engine` / `solver_ipc`: mirror every `IpcDiagSample`
+/// through this API (including `origin` + `engine_rejection` on `ok:false`).
+pub fn record_launch_ipc_sample(sample: LaunchIpcSample) {
+    let sample = sample.sanitize();
+    let _ = with_launch_ipc(|state| {
+        if let Some(live) = state.live.as_mut() {
+            live.push(sample);
+        } else {
+            // No begin yet — still retain under a provisional live ring so
+            // teardown can freeze something useful.
+            let mut live = LiveLaunchDiag {
+                launch_id: sample.launch_id.clone(),
+                protocol: 2,
+                sidecar_build_id: "unknown".into(),
+                child_exit: sample.child_exit.clone(),
+                samples: VecDeque::new(),
+            };
+            live.push(sample);
+            state.live = Some(live);
+        }
+    });
+}
+
+/// Observe actual child exit status for the live launch (kill/reap / EOF).
+pub fn note_last_launch_child_exit(exit: &str) {
+    let exit = truncate_diag_token(exit, 128);
+    if exit.is_empty() {
+        return;
+    }
+    let _ = with_launch_ipc(|state| {
+        if let Some(live) = state.live.as_mut() {
+            live.child_exit = Some(exit);
+        }
+    });
+}
+
+/// Freeze the live ring into the process-global last-launch snapshot and
+/// persist `last-launch-ipc.json` for support ZIP.
+///
+/// Idempotent when there is nothing live; preserves the prior snapshot.
+/// Invoked automatically when [`remember_sidecar_pid`] clears the PID.
+pub fn preserve_last_launch_snapshot() -> Option<LastLaunchSnapshot> {
+    let snap = with_launch_ipc(|state| {
+        if let Some(live) = state.live.take() {
+            let frozen = live.freeze();
+            state.last = Some(frozen.clone());
+            Some(frozen)
+        } else {
+            state.last.clone()
+        }
+    })?;
+    if let Some(ref snapshot) = snap {
+        write_last_launch_file(snapshot);
+    }
+    snap
+}
+
+fn write_last_launch_file(snapshot: &LastLaunchSnapshot) {
+    let Ok(dir) = ensure_diagnostics_dir() else {
+        return;
+    };
+    let path = dir.join(LAST_LAUNCH_IPC);
+    match serde_json::to_string_pretty(snapshot) {
+        Ok(body) => {
+            if let Err(err) = fs::write(&path, body) {
+                eprintln!("warn: diagnostics last-launch-ipc write failed: {err}");
+            }
+        }
+        Err(err) => eprintln!("warn: diagnostics last-launch-ipc encode failed: {err}"),
+    }
+}
+
+/// Process-global last preserved launch snapshot (survives session teardown).
+pub fn last_launch_snapshot() -> Option<LastLaunchSnapshot> {
+    with_launch_ipc(|state| state.last.clone()).flatten()
+}
+
+/// Samples for support / Tauri diagnostics: live ring if present, else last.
+///
+/// Prefer this over reading only the SessionIo ring so reconnect does not
+/// return an empty list solely because the live connection died.
+pub fn ipc_diagnostics_for_support() -> Vec<LaunchIpcSample> {
+    with_launch_ipc(|state| {
+        if let Some(live) = state.live.as_ref() {
+            return live.samples.iter().cloned().collect();
+        }
+        state
+            .last
+            .as_ref()
+            .map(|s| s.samples.clone())
+            .unwrap_or_default()
+    })
+    .unwrap_or_default()
+}
+
+/// Full snapshot for support ZIP / UI: live freeze-view or last preserved.
+pub fn launch_ipc_snapshot_for_support() -> Option<LastLaunchSnapshot> {
+    with_launch_ipc(|state| {
+        if let Some(live) = state.live.as_ref() {
+            return Some(live.freeze());
+        }
+        state.last.clone()
+    })
+    .flatten()
+}
+
+#[cfg(test)]
+fn reset_launch_ipc_for_test() {
+    let _ = with_launch_ipc(|state| {
+        state.live = None;
+        state.last = None;
+    });
 }
 
 /// Resolve the diagnostics directory (creates nothing).
@@ -809,12 +1140,16 @@ pub struct SessionMeta {
 }
 
 /// Write `session-meta.json` after a successful ready handshake.
+///
+/// Also begins the live last-launch IPC ring with UI/sidecar build IDs so a
+/// later teardown can freeze a non-empty support snapshot.
 pub fn write_session_meta(
     launch_id: &str,
     protocol: u32,
     workers: u32,
     sidecar: &str,
 ) {
+    begin_launch_diagnostics(launch_id, protocol, sidecar);
     let Ok(dir) = ensure_diagnostics_dir() else {
         return;
     };
@@ -1176,6 +1511,8 @@ mod tests {
         let readme = fs::read_to_string(dir.join(README_NAME)).expect("readme");
         assert!(readme.contains("Zip this folder"));
         assert!(readme.contains("last-solve.json"));
+        assert!(readme.contains("last-launch-ipc.json"));
+        assert!(readme.contains("engine_rejection"));
         assert!(readme.contains("host-resources.json"));
         assert!(readme.contains("snapshotKind=pre-solve"));
     }
@@ -1314,5 +1651,145 @@ mod tests {
     #[test]
     fn crc32_known_vector() {
         assert_eq!(crc32_ieee(b"123456789"), 0xCBF4_3926);
+    }
+
+    #[test]
+    fn host_reply_outcome_distinguishes_engine_rejection() {
+        assert_eq!(outcome_for_host_reply(Some(true)), ipc_outcome::OK);
+        assert_eq!(
+            outcome_for_host_reply(Some(false)),
+            ipc_outcome::ENGINE_REJECTION
+        );
+        assert_eq!(outcome_for_host_reply(None), ipc_outcome::OK);
+        assert_ne!(ipc_outcome::ENGINE_REJECTION, ipc_outcome::OK);
+    }
+
+    #[test]
+    fn last_launch_ring_bounds_and_survives_teardown() {
+        let (dir, _guard) = isolated_dir("last-launch");
+        reset_launch_ipc_for_test();
+        begin_launch_diagnostics("zig-launch-1", 2, "solver-engine@test");
+
+        for i in 0..(LAUNCH_IPC_RING_CAP + 5) {
+            record_launch_ipc_sample(LaunchIpcSample {
+                launch_id: "zig-launch-1".into(),
+                request_id: Some(format!("r{i}")),
+                op: Some(if i % 3 == 0 {
+                    "status".into()
+                } else {
+                    "values".into()
+                }),
+                origin: Some(if i % 2 == 0 {
+                    "status-poll".into()
+                } else {
+                    "ui".into()
+                }),
+                queue_wait_ms: Some(1),
+                write_duration_ms: Some(2),
+                reply_wait_ms: Some(3),
+                child_exit: None,
+                outcome: if i == LAUNCH_IPC_RING_CAP + 4 {
+                    ipc_outcome::ENGINE_REJECTION.into()
+                } else {
+                    ipc_outcome::OK.into()
+                },
+            });
+        }
+        note_last_launch_child_exit("exit code: 1");
+
+        let live = ipc_diagnostics_for_support();
+        assert_eq!(live.len(), LAUNCH_IPC_RING_CAP);
+        assert_eq!(
+            live.first().and_then(|s| s.request_id.as_deref()),
+            Some("r5")
+        );
+        assert!(live.iter().any(|s| s.origin.as_deref() == Some("ui")));
+        assert!(live.iter().any(|s| s.queue_wait_ms == Some(1)));
+        assert_eq!(
+            live.last().map(|s| s.outcome.as_str()),
+            Some(ipc_outcome::ENGINE_REJECTION)
+        );
+
+        // Simulate session teardown (solver_engine clears sidecar PID).
+        remember_sidecar_pid(None);
+
+        assert!(
+            last_launch_snapshot().is_some(),
+            "teardown must freeze last-launch"
+        );
+        let support = ipc_diagnostics_for_support();
+        assert_eq!(support.len(), LAUNCH_IPC_RING_CAP);
+        assert_eq!(
+            support.last().map(|s| s.outcome.as_str()),
+            Some(ipc_outcome::ENGINE_REJECTION)
+        );
+
+        let snap = launch_ipc_snapshot_for_support().expect("snapshot");
+        assert_eq!(snap.launch_id, "zig-launch-1");
+        assert_eq!(snap.ui_version, UI_VERSION);
+        assert_eq!(snap.sidecar_build_id, "solver-engine@test");
+        assert_eq!(snap.protocol, 2);
+        assert_eq!(snap.child_exit.as_deref(), Some("exit code: 1"));
+        assert!(!snap.samples.is_empty());
+
+        let on_disk: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(dir.join(LAST_LAUNCH_IPC)).expect("last-launch file"),
+        )
+        .expect("json");
+        assert_eq!(on_disk["launchId"], "zig-launch-1");
+        assert_eq!(on_disk["uiVersion"], UI_VERSION);
+        assert_eq!(on_disk["sidecarBuildId"], "solver-engine@test");
+        assert_eq!(on_disk["childExit"], "exit code: 1");
+        let samples = on_disk["samples"].as_array().expect("samples");
+        assert_eq!(samples.len(), LAUNCH_IPC_RING_CAP);
+        assert_eq!(
+            samples.last().and_then(|s| s.get("outcome")).and_then(|v| v.as_str()),
+            Some(ipc_outcome::ENGINE_REJECTION)
+        );
+        // No range / checkpoint payload keys on samples.
+        for s in samples {
+            assert!(s.get("body").is_none());
+            assert!(s.get("range").is_none());
+            assert!(s.get("ranges").is_none());
+            assert!(s.get("checkpoint").is_none());
+            assert!(s.get("oop_range").is_none());
+        }
+
+        // Fresh "reconnect" begins a new live ring; support still exposes last
+        // until new samples arrive — and disk snapshot stays for ZIP.
+        begin_launch_diagnostics("zig-launch-2", 2, "solver-engine@test2");
+        let after_reconnect = last_launch_snapshot().expect("still have last");
+        assert_eq!(after_reconnect.launch_id, "zig-launch-1");
+        assert!(dir.join(LAST_LAUNCH_IPC).exists());
+    }
+
+    #[test]
+    fn session_meta_begins_launch_ring_with_build_ids() {
+        let (dir, _guard) = isolated_dir("meta-launch");
+        reset_launch_ipc_for_test();
+        write_session_meta("zig-meta", 2, 4, "solver-engine");
+        record_launch_ipc_sample(LaunchIpcSample {
+            launch_id: "zig-meta".into(),
+            request_id: Some("r-ready".into()),
+            op: Some("ready".into()),
+            origin: Some("ensure".into()),
+            queue_wait_ms: Some(0),
+            write_duration_ms: Some(1),
+            reply_wait_ms: Some(2),
+            child_exit: None,
+            outcome: ipc_outcome::OK.into(),
+        });
+        let preserved = preserve_last_launch_snapshot().expect("preserve");
+        assert_eq!(preserved.ui_version, UI_VERSION);
+        assert_eq!(preserved.sidecar_build_id, "solver-engine");
+        assert_eq!(preserved.samples[0].origin.as_deref(), Some("ensure"));
+        assert!(dir.join(LAST_LAUNCH_IPC).exists());
+        let zip = bundle_diagnostics_zip().expect("zip");
+        let bytes = fs::read(&zip).expect("read zip");
+        let name = b"last-launch-ipc.json";
+        assert!(
+            bytes.windows(name.len()).any(|w| w == name),
+            "support zip must include last-launch-ipc.json"
+        );
     }
 }
