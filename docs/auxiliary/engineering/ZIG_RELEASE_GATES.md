@@ -47,8 +47,8 @@ When recording store scoreboard rows (optional; not required for cutover):
 
 | Workflow | Role |
 | --- | --- |
-| `.github/workflows/zig.yml` | Linux + Windows `zig build` / `zig build test` + ready smoke + Study contract smoke (`scripts/zig/study-contract-smoke.py`, river fixture, ≤60s) + Linux overlap-actions smoke (`scripts/zig/study-overlap-actions-smoke.py`, ZR-152); Windows pins `-Dcpu=x86_64_v2`. Windows packaged Study overlap waits for ma1pc (ZR-147). |
-| `.github/workflows/windows-installer.yml` | Shipping NSIS. `externalBin` is Zig `solver-engine`. `windows-installer-e2e` Stage A (install + WebView drive), Stage B (river clear-then-reopen PSOL), Stage DelayedReply (packaged WebView concurrency via `ipc-async-acceptance.ps1`). |
+| `.github/workflows/zig.yml` | Linux + Windows `zig build` / `zig build test` + ready smoke + `check-no-avx512.py` + equity-calculator smoke + Study contract smoke (`scripts/zig/study-contract-smoke.py`, river fixture, ≤60s) + `holdem-study-cli` smoke. Linux also runs engine-crash-recovery, stop-close-responsive, overlap-actions (`scripts/zig/study-overlap-actions-smoke.py`, ZR-152), and status-vs-mutation smokes. Windows passes `-Dcpu=x86_64_v2`. On x86_64, omitting `-Dcpu` already targets `x86_64_v2`. Windows packaged Study overlap waits for ma1pc (ZR-147). |
+| `.github/workflows/windows-installer.yml` | Shipping NSIS. `externalBin` is Zig `solver-engine`. `windows-installer-e2e` Stage A (install + WebView drive), Stage B (river clear-then-reopen PSOL), Stage DelayedReply (packaged WebView concurrency via `ipc-async-acceptance.ps1`), Stage BlockedWrite, Stage NormalClosePending, and Stage StaleCallAfterReconnect. |
 | `.github/workflows/windows-installer-release.yml` | Tag-triggered release wrapper that reuses `windows-installer.yml` |
 | `.github/workflows/ci.yml` | Desktop Vitest, `tsc`, and build |
 | `.github/workflows/public-demo-pages.yml` | Precomputed public Study demo build, Playwright (desktop + phone), deploy `desktop/dist-public-demo` |
@@ -62,7 +62,7 @@ The installer packages `solver-engine`.
 ```bash
 ./scripts/zig/install-toolchain.sh   # Linux x86_64 — verifies official sha256
 zig version                          # expect 0.14.1
-./scripts/build.sh                   # pins -Dcpu=x86_64_v2 (override via ZIG_CPU)
+./scripts/build.sh                   # passes -Dcpu=x86_64_v2 (ZIG_CPU overrides). On x86_64, omitting -Dcpu already targets x86_64_v2. -Dcpu=native follows the builder CPU.
 # or: zig build -Doptimize=ReleaseFast -Dcpu=x86_64_v2 && zig build test -Dcpu=x86_64_v2
 python3 scripts/zig/study-contract-smoke.py ./zig-out/bin/solver-engine
 ```

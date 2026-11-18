@@ -190,13 +190,17 @@ Late on November 13, a three-PR Rust stack moved connection ownership off the Ta
 
 The same night, wide-range flop EV and equity after a successful solve stopped walking the first chance card on one thread, stopped counting pair-runouts by nesting the runout list, and stopped prefetching non-root flop and turn child values. Root values use the threaded frozen walk. Equity preflight counts pair-runouts in closed form. [Wide-range flop EV and equity](https://github.com/matt-azar/poker-solver/pull/384)
 
-November 14 published `v0.1.6-windows`. The package version on the desktop and Tauri manifests is 0.1.6. The cut includes the IPC ownership work, the flop EV/equity change, the hang and job/launch fixes, and the LocalDumps console-flash fix. [Windows 0.1.6](https://github.com/matt-azar/poker-solver/pull/385)
+November 14 published `v0.1.6-windows`. The package version in that cut was 0.1.6. The cut includes the IPC ownership work, the flop EV/equity change, the hang and job/launch fixes, and the LocalDumps console-flash fix. [Windows 0.1.6](https://github.com/matt-azar/poker-solver/pull/385)
 
 ## After the 0.1.6 Windows cut
 
 On November 15 the repository published a precomputed public Study demo on GitHub Pages and a limited five-card river browser beta. Neither replaces the Windows Tauri app. [Public demo](https://github.com/matt-azar/poker-solver/pull/414) · [River beta](https://github.com/matt-azar/poker-solver/pull/415)
 
 On November 16, `holdem-study-job/1` became the shared job file for Build and `holdem-study-cli` (`plan`, `solve`, `from-hh`). `from-hh` reads a five-card `hand-history 1` document. Settings shows CFR+ only. The Build preview tree and its decision branches start collapsed. [Study job CLI](https://github.com/matt-azar/poker-solver/pull/428) · [Settings CFR+](https://github.com/matt-azar/poker-solver/pull/433) · [Collapsed preview](https://github.com/matt-azar/poker-solver/pull/434)
+
+On November 17 the repository published `v0.1.7-windows`. Desktop, Tauri, and Cargo versions are `0.1.7`. That tag is the current published Windows installer. Save mode is **Study only** or **Resumable checkpoint**. Dual-session Compare over IPC is on. Equity Calculator jobs run over IPC. Flop and turn Categories include draw and backdoor tags. [Windows 0.1.7](https://github.com/matt-azar/poker-solver/pull/437) · [Study-only save](https://github.com/matt-azar/poker-solver/pull/445) · [Compare](https://github.com/matt-azar/poker-solver/pull/446) · [Categories](https://github.com/matt-azar/poker-solver/pull/447) · [Equity calculator](https://github.com/matt-azar/poker-solver/pull/439)
+
+On November 18 the Study lower dock equity panel is named **Range equity**. There is no Runouts tab. Protocol 2 payload ceiling is 16 MiB on the Zig host and the desktop Rust framer. Analysis uses one persistent worker and one generation per metric. Build, Open, Save, and train share one exclusive mutation gate. Status, cancel, and pause stay available during that gate. Installer E2E runs Stage A, Stage B, DelayedReply, BlockedWrite, NormalClosePending, and StaleCallAfterReconnect. Parent stdin EOF stops the session, joins workers, and leaves the stop latch set. On x86_64, `zig build` defaults to `x86_64_v2` when `-Dcpu` is omitted. [Range equity](https://github.com/matt-azar/poker-solver/pull/451) · [16 MiB frames](https://github.com/matt-azar/poker-solver/pull/455) · [Parent EOF](https://github.com/matt-azar/poker-solver/pull/456) · [Installer stages](https://github.com/matt-azar/poker-solver/pull/467) · [Analysis pool](https://github.com/matt-azar/poker-solver/pull/476) · [Exclusive admission](https://github.com/matt-azar/poker-solver/pull/479)
 
 ## Current documentation
 
