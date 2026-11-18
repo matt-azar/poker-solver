@@ -75,18 +75,9 @@ export function LowerDock() {
 
   const openTab = (id: DockTabId) => {
     setAnalysisTab(id);
-    // Cap so Categories / Equity do not cover most of the 13×13 at laptop heights.
-    const preferred = Math.min(
-      clampDockHeight(Math.max(layout.lowerDockHeight, 240)),
-      clampDockHeight(
-        typeof window === "undefined"
-          ? 280
-          : Math.floor(window.innerHeight * 0.35),
-      ),
-    );
     setLayout({
       lowerDock: true,
-      lowerDockHeight: preferred,
+      lowerDockHeight: Math.max(layout.lowerDockHeight, 400),
     });
   };
 

@@ -80,7 +80,7 @@
   /* Shell chrome heights/widths (layout.css reads these) */
   --menubar-h: 32px;
   --tabs-h: 28px;
-  --context-h: 44px; /* Compact Study context strip (board / actor / pot / stacks) */
+  --context-h: 52px; /* Study context strip (board / pot / stacks) */
   --statusbar-h: 34px;
   --history-h: 120px; /* Default action-history height before user resize */
   --dock-h: 240px; /* Default lower analysis dock height */

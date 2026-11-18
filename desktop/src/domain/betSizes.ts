@@ -938,42 +938,6 @@ export function formatActionDisplay(
   return { primary: trimmed, secondary: chipText, raw: trimmed, potTag: null };
 }
 
-/**
- * Readable label for current-decision navigation buttons (`Bet 33%`).
- * Path history and size columns keep compact tags via {@link formatActionDisplay}.
- */
-export function formatActionNavLabel(
-  label: string,
-  pot: number,
-  options: FormatActionDisplayOptions = {},
-): string {
-  const trimmed = label.trim();
-  if (!trimmed) {
-    return trimmed;
-  }
-  if (/^(check|fold|call)$/i.test(trimmed)) {
-    return trimmed[0]!.toUpperCase() + trimmed.slice(1).toLowerCase();
-  }
-  if (/^call\b/i.test(trimmed)) {
-    return trimmed;
-  }
-  if (/^all[\s-]*in$/i.test(trimmed)) {
-    return "All-in";
-  }
-  const toCall = Number(options.toCall ?? 0);
-  const potTag = potTagFromLabel(trimmed, pot, toCall, "base");
-  const parsed = parseSizedAction(trimmed);
-  if (potTag && parsed && parsed.kind !== "call") {
-    const match = potTag.match(/^([br])(\d+(?:\.\d+)?)/i);
-    if (match) {
-      const verb = match[1]!.toLowerCase() === "r" ? "Raise" : "Bet";
-      const pct = match[2]!;
-      return parsed.allIn ? `${verb} ${pct}% all-in` : `${verb} ${pct}%`;
-    }
-  }
-  return trimmed;
-}
-
 /** Tooltip / title text: primary, optional chips, raw engine label. */
 export function formatActionTooltip(
   label: string,

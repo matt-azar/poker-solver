@@ -5,7 +5,6 @@ import {
   encodeRaiseList,
   EXPLICIT_EMPTY_SPEC,
   formatActionDisplay,
-  formatActionNavLabel,
   formatActionTooltip,
   formatDonkField,
   formatEngineSpec,
@@ -305,16 +304,6 @@ describe("betSizes", () => {
     const chipsOnly = formatActionDisplay("Bet 50", 100, "chips");
     expect(chipsOnly.primary).toBe("50.0 chips");
     expect(chipsOnly.potTag).toBe("b50");
-  });
-
-  it("formats readable nav labels as Bet/Raise N% for current buttons", () => {
-    expect(formatActionNavLabel("Bet 33", 100)).toBe("Bet 33%");
-    expect(formatActionNavLabel("Bet 50", 100)).toBe("Bet 50%");
-    expect(formatActionNavLabel("Check", 100)).toBe("Check");
-    expect(formatActionNavLabel("Raise to 400", 300, { toCall: 100 })).toBe(
-      "Raise 100%",
-    );
-    expect(formatActionNavLabel("Bet 150 all-in", 100)).toBe("Bet 150% all-in");
   });
 
   it("formats Study action display as pot tag + chips with units", () => {

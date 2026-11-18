@@ -7,7 +7,6 @@ import {
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
-import { actionSizePotBasis } from "../../domain/actionHistory";
 import { mapActionColors } from "../../domain/actionColors";
 import {
   type AggregatedHandCell,
@@ -30,10 +29,6 @@ import {
   weightFillFraction,
 } from "../../domain/matrixDisplay";
 import {
-  ACTION_FILTER_DIM_THRESHOLD,
-  actionShareMeetsFilter,
-} from "../../domain/matrixFilter";
-import {
   buildStrategyPaintSegments,
   type StrategyPaintSegment,
 } from "../../domain/strategyPaint";
@@ -45,6 +40,7 @@ import {
   type NodePayload,
 } from "../../domain/types";
 import { usePhoneDemoLayout } from "../../demo/phoneLayout";
+import { clampDockHeight } from "../../state/layoutStore";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
 import { useValueBluffsHighlightStore } from "../../state/valueBluffsHighlightStore";
@@ -196,6 +192,8 @@ export function RangeMatrix() {
   const displayPrefs = useMatrixDisplayStore((s) => s.prefs);
   const dualRange = useStudyStore((s) => s.layout.dualRange);
   const matrixWidth = useStudyStore((s) => s.layout.matrixWidth);
+  const lowerDockOpen = useStudyStore((s) => s.layout.lowerDock);
+  const lowerDockHeight = useStudyStore((s) => s.layout.lowerDockHeight);
   const setLayout = useStudyStore((s) => s.setLayout);
   const phoneDemo = usePhoneDemoLayout();
   const userWidth =
@@ -254,17 +252,7 @@ export function RangeMatrix() {
   }, [equity, currentNode?.player]);
 
   const actions = currentNode?.actions;
-  const status = useStudyStore((s) => s.status);
-  const draft = useStudyStore((s) => s.draft);
-  const pot = actionSizePotBasis(
-    currentNode,
-    Number(status?.pot ?? draft.pot ?? 0),
-  );
-  const toCall = Number(currentNode?.to_call ?? 0);
-  const colors = useMemo(
-    () => mapActionColors(actions ?? [], { pot, toCall }),
-    [actions, pot, toCall],
-  );
+  const colors = useMemo(() => mapActionColors(actions ?? []), [actions]);
 
   const evScale = useMemo(() => {
     if (!currentNode || !nodeValues || nodeValues.pending) {
@@ -333,6 +321,11 @@ export function RangeMatrix() {
       {phoneDemo ? null : (
         <div
           className="resize-handle resize-handle--vertical range-matrix__resize"
+          style={
+            lowerDockOpen
+              ? { bottom: clampDockHeight(lowerDockHeight) }
+              : undefined
+          }
           onPointerDown={onResizePointerDown}
           role="separator"
           aria-orientation="vertical"
@@ -532,18 +525,14 @@ function MatrixRow({
           if (valueBluffsHighlight != null) {
             dimmed = !valueBluffsHighlight.has(text);
           } else if (actionFilter != null && cell.actionMass.length) {
-            // Selected action: dim cells below the visible cutoff; outline the rest.
+            // Selected action: dim cells that barely use it, outline the rest.
             // With no overlay, the sublabel becomes that action's share of the cell.
             const share =
               cell.marginalSum > 0
                 ? cell.actionMass[actionFilter] / cell.marginalSum
                 : 0;
-            const meets = actionShareMeetsFilter(
-              share,
-              ACTION_FILTER_DIM_THRESHOLD,
-            );
-            dimmed = !meets;
-            filtered = meets;
+            dimmed = share < 0.02;
+            filtered = share >= 0.02;
             if (showStrategy && displayPrefs.cellOverlay === "none") {
               sub = `${(share * 100).toFixed(0)}%`;
             }
