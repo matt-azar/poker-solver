@@ -1499,6 +1499,62 @@ test "rejected open preserves prior solution under compiling gate" {
     try std.testing.expect(sess.canContinue());
 }
 
+test "warm FrozenCtx analysis hold is exclusive" {
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(river_cfg);
+    try sess.train(1);
+    try std.testing.expect(sess.frozen_ctx != null);
+    try std.testing.expect(sess.frozen_ctx.?.ranks_ready);
+
+    const first = try sess.acquireFrozenCtxForAnalysis();
+    try std.testing.expect(first.ranks_ready);
+    // Overlapping acquire must fail closed — shared mutable workspace is exclusive.
+    try std.testing.expectError(error.Busy, sess.acquireFrozenCtxForAnalysis());
+    try std.testing.expectEqual(@as(u32, 1), sess.frozen_analysis_holds);
+
+    sess.releaseFrozenCtxForAnalysis();
+    try std.testing.expectEqual(@as(u32, 0), sess.frozen_analysis_holds);
+    const second = try sess.acquireFrozenCtxForAnalysis();
+    defer sess.releaseFrozenCtxForAnalysis();
+    try std.testing.expect(second == first);
+    try std.testing.expectEqual(@as(u32, 1), sess.frozen_analysis_holds);
+}
+
+test "exclusive warm FrozenCtx hold serializes begin until release" {
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(river_cfg);
+    try sess.train(1);
+    const prior_id = sess.solution_id;
+
+    _ = try sess.acquireFrozenCtxForAnalysis();
+
+    const BeginCtx = struct {
+        sess: *Session,
+        cfg: []const u8,
+        err: ?anyerror = null,
+        fn run(ctx: *@This()) void {
+            ctx.sess.begin(ctx.cfg) catch |e| {
+                ctx.err = e;
+            };
+        }
+    };
+    var ctx = BeginCtx{ .sess = &sess, .cfg = river_cfg };
+    const thread = try std.Thread.spawn(.{}, BeginCtx.run, .{&ctx});
+
+    // Begin reaches waitQuietForReplaceLocked while the analysis hold is live.
+    std.Thread.sleep(50 * std.time.ns_per_ms);
+    try std.testing.expectEqual(prior_id, sess.solution_id);
+    try std.testing.expectEqual(@as(u32, 1), sess.frozen_analysis_holds);
+
+    sess.releaseFrozenCtxForAnalysis();
+    thread.join();
+    try std.testing.expect(ctx.err == null);
+    try std.testing.expect(sess.solution_id != prior_id);
+    try std.testing.expectEqual(@as(u32, 0), sess.frozen_analysis_holds);
+}
+
 test {
     _ = session;
     _ = plan_preview;

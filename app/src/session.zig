@@ -194,8 +194,11 @@ pub const Session = struct {
     /// Cleared on `begin` / deinit / thread-count change. Do not move after the
     /// chance pool has started (lazy on first parallel chance dispatch).
     frozen_ctx: ?poker_engine.solve.frozen_walk.FrozenCtx = null,
-    /// Analysis workers holding `frozen_ctx` for Study values/equity (warm ranks).
-    /// Train / begin / setThreads wait until zero before mutating or freeing ctx.
+    /// Exclusive analysis holds of `frozen_ctx` for Study values/equity.
+    /// At most one holder: shared mutable workspace / extras / result* are not
+    /// multi-writer safe. Immutable ranks stay Session-owned and are reused
+    /// (not rebuilt) under that exclusive hold. Train / begin / setThreads wait
+    /// until zero before mutating or freeing ctx.
     frozen_analysis_holds: u32 = 0,
     /// Active Save leases holding game/average/trainer arrays stable for streaming.
     /// Begin/Open drain this before detach; train/publish refuse or wait while held.
@@ -568,15 +571,22 @@ pub const Session = struct {
     }
 
     /// Borrow Session FrozenCtx for Study values/equity when ranks are warm and
-    /// train is idle. Caller must `releaseFrozenCtxForAnalysis`. Returns `Busy`
-    /// mid-train / mid-begin or when ranks are not ready (caller falls back).
+    /// train is idle. Grants **exclusive** ownership of the mutable evaluation
+    /// scratch (`workspace` / extras / result*) for one computation; immutable
+    /// ranks are shared Session state and are not rebuilt. Caller must
+    /// `releaseFrozenCtxForAnalysis`. Returns `Busy` mid-train / mid-begin,
+    /// when ranks are not ready, or when another analysis already holds the
+    /// warm ctx (caller falls back to a private eval / pair enumeration).
     pub fn acquireFrozenCtxForAnalysis(self: *Session) SessionError!*poker_engine.solve.frozen_walk.FrozenCtx {
         self.mu.lock();
         defer self.mu.unlock();
         if (self.phase == .training or self.phase == .compiling) return error.Busy;
+        // Exclusive mutable scratch: overlapping holders would race equity
+        // checkdownWinTieLoss (and any path still writing ctx.workspace).
+        if (self.frozen_analysis_holds != 0) return error.Busy;
         const ctx = &(self.frozen_ctx orelse return error.Busy);
         if (!ctx.ranks_ready) return error.Busy;
-        self.frozen_analysis_holds += 1;
+        self.frozen_analysis_holds = 1;
         return ctx;
     }
 
