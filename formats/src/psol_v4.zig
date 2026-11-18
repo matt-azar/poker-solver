@@ -9,6 +9,9 @@ pub const header_bytes: usize = 32;
 pub const flag_training: u32 = 1 << 0;
 pub const flag_overlays: u32 = 1 << 1;
 pub const flag_metrics: u32 = 1 << 2;
+/// Trainer tables were produced under modeled ICM terminals (post chip→ICM fix).
+/// Header-only: old ICM checkpoints lack this bit and must not Continue.
+pub const flag_icm_modeled_train: u32 = 1 << 3;
 
 pub const algorithm_cfr_plus: u8 = 1;
 
@@ -54,6 +57,8 @@ pub const Document = struct {
     /// True when the v4 `flag_training` bit is set (may have empty tables on
     /// degenerate check-only trees). Distinct from browse-only documents.
     has_training_flag: bool = false,
+    /// True when `flag_icm_modeled_train` is set (ICM-aware trainer tables).
+    icm_modeled_train: bool = false,
 
     pub fn deinit(self: *Document) void {
         freeSlice(self.allocator, self.config_text);
@@ -76,6 +81,15 @@ pub const Document = struct {
         return self.locks_text.len != 0 or self.strategy_edits_text.len != 0;
     }
 };
+
+fn documentFlags(document: Document) u32 {
+    var flags: u32 = 0;
+    if (document.hasTraining()) flags |= flag_training;
+    if (document.hasOverlays()) flags |= flag_overlays;
+    if (document.has_metrics) flags |= flag_metrics;
+    if (document.icm_modeled_train) flags |= flag_icm_modeled_train;
+    return flags;
+}
 
 fn freeSlice(allocator: std.mem.Allocator, slice: anytype) void {
     if (slice.len != 0) allocator.free(slice);
@@ -278,10 +292,7 @@ pub fn encode(allocator: std.mem.Allocator, document: Document) OpenError![]u8 {
     std.debug.assert(document.config_text.len > 0);
     if (document.slot_actions.len != 0) std.debug.assert(document.average.len > 0);
 
-    var flags: u32 = 0;
-    if (document.hasTraining()) flags |= flag_training;
-    if (document.hasOverlays()) flags |= flag_overlays;
-    if (document.has_metrics) flags |= flag_metrics;
+    const flags = documentFlags(document);
 
     var writer = Writer.init(allocator);
     defer writer.deinit();
@@ -375,6 +386,7 @@ pub fn decode(allocator: std.mem.Allocator, file: []const u8) OpenError!Document
     if (document.average.len == 0 and document.slot_actions.len != 0) return error.InvalidPsol;
     // Read-side pair for encode's average/slot precondition.
     if (document.slot_actions.len != 0) std.debug.assert(document.average.len > 0);
+    document.icm_modeled_train = (flags & flag_icm_modeled_train) != 0;
 
     if ((flags & flag_training) != 0) {
         document.has_training_flag = true;
@@ -748,10 +760,7 @@ pub fn writeFileMemoryOrderInjected(
     std.debug.assert(total_bytes >= header_bytes);
     std.debug.assert(total_bytes <= max_psol_bytes);
 
-    var flags: u32 = 0;
-    if (document.hasTraining()) flags |= flag_training;
-    if (document.hasOverlays()) flags |= flag_overlays;
-    if (document.has_metrics) flags |= flag_metrics;
+    const flags = documentFlags(document);
 
     const dirname = std.fs.path.dirname(path) orelse ".";
     const basename = std.fs.path.basename(path);
@@ -836,10 +845,7 @@ pub fn writeFileInjected(
     std.debug.assert(total_bytes >= header_bytes);
     std.debug.assert(total_bytes <= max_psol_bytes);
 
-    var flags: u32 = 0;
-    if (document.hasTraining()) flags |= flag_training;
-    if (document.hasOverlays()) flags |= flag_overlays;
-    if (document.has_metrics) flags |= flag_metrics;
+    const flags = documentFlags(document);
 
     // Callers pass an already-unescaped filesystem path (host JSON unescape).
     const dirname = std.fs.path.dirname(path) orelse ".";
@@ -1217,6 +1223,7 @@ pub fn readFile(allocator: std.mem.Allocator, path: []const u8) OpenError!Docume
     document.average = try src.f32s(allocator);
     if (document.average.len == 0 and document.slot_actions.len != 0) return error.InvalidPsol;
     if (document.slot_actions.len != 0) std.debug.assert(document.average.len > 0);
+    document.icm_modeled_train = (flags & flag_icm_modeled_train) != 0;
 
     if ((flags & flag_training) != 0) {
         document.has_training_flag = true;
@@ -1261,6 +1268,7 @@ test "v4 roundtrip browse + training + overlays" {
     doc.strategy_edits_text = try std.testing.allocator.dupe(u8, "");
     doc.metrics = .{ .value = 1.5, .br0 = 2, .br1 = -2, .nash_gap = 0.5, .accuracy = 0.25 };
     doc.has_metrics = true;
+    doc.icm_modeled_train = true;
 
     const bytes = try encode(std.testing.allocator, doc);
     defer std.testing.allocator.free(bytes);
@@ -1271,6 +1279,7 @@ test "v4 roundtrip browse + training + overlays" {
     try std.testing.expect(loaded.hasTraining());
     try std.testing.expect(loaded.hasOverlays());
     try std.testing.expect(loaded.has_metrics);
+    try std.testing.expect(loaded.icm_modeled_train);
     try std.testing.expectEqual(@as(i32, 7), loaded.trained);
     try std.testing.expectEqual(@as(usize, 5), loaded.average.len);
     try std.testing.expectApproxEqAbs(@as(f64, 0.25), loaded.metrics.accuracy, 1e-12);

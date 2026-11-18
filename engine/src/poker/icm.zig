@@ -77,16 +77,31 @@ fn icmRecurse(
 /// tables fall back to the allocator path in `icmEquities` / `applyIcmTerminal`.
 pub const max_stack_seats: usize = 16;
 
+/// Already-zero seats have finished from the bottom of the field and take those
+/// places immediately (bust on this hand → last remaining prize). Contested
+/// places among positive stacks are `payouts[0..contested_end)`.
 fn icmEquitiesInto(stacks: []const f64, payouts: []const f64, work: []f64, equities: []f64) IcmError!void {
     try validateInputs(stacks, payouts);
-    if (work.len < stacks.len or equities.len < stacks.len) return error.InvalidIcm;
-    @memcpy(work[0..stacks.len], stacks);
-    @memset(equities[0..stacks.len], 0);
+    const n = stacks.len;
+    if (work.len < n or equities.len < n) return error.InvalidIcm;
+    @memcpy(work[0..n], stacks);
+    @memset(equities[0..n], 0);
+    var contested_end: usize = n;
     var alive: usize = 0;
-    for (work[0..stacks.len]) |s| {
-        if (s > 0.0) alive += 1;
+    for (work[0..n], 0..) |s, i| {
+        if (s > 0.0) {
+            alive += 1;
+        } else {
+            // Assign the next worst place (from the end of the seat list).
+            contested_end -= 1;
+            if (contested_end < payouts.len) {
+                equities[i] += payouts[contested_end];
+            }
+        }
     }
-    icmRecurse(work[0..stacks.len], alive, payouts, 0, 1.0, equities[0..stacks.len]);
+    if (alive == 0) return;
+    const contested = if (contested_end <= payouts.len) payouts[0..contested_end] else payouts;
+    icmRecurse(work[0..n], alive, contested, 0, 1.0, equities[0..n]);
 }
 
 pub fn icmEquities(allocator: std.mem.Allocator, stacks: []const f64, payouts: []const f64) IcmError![]f64 {
@@ -99,27 +114,21 @@ pub fn icmEquities(allocator: std.mem.Allocator, stacks: []const f64, payouts: [
         @memcpy(equities, eq_buf[0..stacks.len]);
         return equities;
     }
-    const work = allocator.dupe(f64, stacks) catch return error.InvalidIcm;
+    const work = allocator.alloc(f64, stacks.len) catch return error.InvalidIcm;
     defer allocator.free(work);
     const equities = allocator.alloc(f64, stacks.len) catch return error.InvalidIcm;
-    @memset(equities, 0);
-    var alive: usize = 0;
-    for (work) |s| {
-        if (s > 0.0) alive += 1;
-    }
-    icmRecurse(work, alive, payouts, 0, 1.0, equities);
+    try icmEquitiesInto(stacks, payouts, work, equities);
     return equities;
 }
 
-/// Chip → ICM delta for seats 0/1. Allocation-free when `stacks.len <= max_stack_seats`
-/// (production frozen CFR+ path); allocator only for oversized tables.
-pub fn applyIcmTerminal(
+fn applyIcmTerminalWithPre(
     allocator: std.mem.Allocator,
     icm: IcmConfig,
+    pre_eq: []const f64,
     chip_terminal: payoff.PlayerPayoff,
 ) IcmError!payoff.PlayerPayoff {
     if (!icm.enabled()) return chip_terminal;
-    if (icm.stacks.len < 2) return error.InvalidIcm;
+    if (icm.stacks.len < 2 or pre_eq.len != icm.stacks.len) return error.InvalidIcm;
     try validateInputs(icm.stacks, icm.payouts);
     if (!std.math.isFinite(chip_terminal.utility[0]) or !std.math.isFinite(chip_terminal.utility[1])) {
         return error.InvalidIcm;
@@ -128,15 +137,12 @@ pub fn applyIcmTerminal(
     if (icm.stacks.len <= max_stack_seats) {
         var post_buf: [max_stack_seats]f64 = undefined;
         var work_buf: [max_stack_seats]f64 = undefined;
-        var pre_buf: [max_stack_seats]f64 = undefined;
         var post_eq_buf: [max_stack_seats]f64 = undefined;
         const n = icm.stacks.len;
         @memcpy(post_buf[0..n], icm.stacks);
         post_buf[0] += chip_terminal.utility[0];
         post_buf[1] += chip_terminal.utility[1];
         if (!(post_buf[0] >= 0.0) or !(post_buf[1] >= 0.0)) return error.InvalidIcm;
-
-        try icmEquitiesInto(icm.stacks, icm.payouts, work_buf[0..n], pre_buf[0..n]);
 
         var post_total: f64 = 0;
         for (post_buf[0..n]) |s| post_total += s;
@@ -147,8 +153,8 @@ pub fn applyIcmTerminal(
         }
         return .{
             .utility = .{
-                post_eq_buf[0] - pre_buf[0],
-                post_eq_buf[1] - pre_buf[1],
+                post_eq_buf[0] - pre_eq[0],
+                post_eq_buf[1] - pre_eq[1],
             },
         };
     }
@@ -162,8 +168,6 @@ pub fn applyIcmTerminal(
     var post_total: f64 = 0;
     for (post) |s| post_total += s;
 
-    const pre_eq = try icmEquities(allocator, icm.stacks, icm.payouts);
-    defer allocator.free(pre_eq);
     var post_eq: []f64 = undefined;
     if (post_total > 0.0) {
         post_eq = try icmEquities(allocator, post, icm.payouts);
@@ -181,6 +185,99 @@ pub fn applyIcmTerminal(
     };
 }
 
+/// Chip → ICM delta for seats 0/1. Allocation-free when `stacks.len <= max_stack_seats`
+/// (production frozen CFR+ path); allocator only for oversized tables.
+pub fn applyIcmTerminal(
+    allocator: std.mem.Allocator,
+    icm: IcmConfig,
+    chip_terminal: payoff.PlayerPayoff,
+) IcmError!payoff.PlayerPayoff {
+    if (!icm.enabled()) return chip_terminal;
+    if (icm.stacks.len < 2) return error.InvalidIcm;
+    try validateInputs(icm.stacks, icm.payouts);
+    if (!std.math.isFinite(chip_terminal.utility[0]) or !std.math.isFinite(chip_terminal.utility[1])) {
+        return error.InvalidIcm;
+    }
+
+    if (icm.stacks.len <= max_stack_seats) {
+        var work_buf: [max_stack_seats]f64 = undefined;
+        var pre_buf: [max_stack_seats]f64 = undefined;
+        const n = icm.stacks.len;
+        try icmEquitiesInto(icm.stacks, icm.payouts, work_buf[0..n], pre_buf[0..n]);
+        return applyIcmTerminalWithPre(allocator, icm, pre_buf[0..n], chip_terminal);
+    }
+
+    const pre_eq = try icmEquities(allocator, icm.stacks, icm.payouts);
+    defer allocator.free(pre_eq);
+    return applyIcmTerminalWithPre(allocator, icm, pre_eq, chip_terminal);
+}
+
+/// Pre-hand equity once + distinct chip-terminal → ICM deltas for the frozen walk.
+/// Keys are exact chip utilities (bit pattern); warm all tree terminals before train.
+pub const TerminalCache = struct {
+    allocator: std.mem.Allocator = undefined,
+    cfg: IcmConfig = .{},
+    pre_eq: []f64 = &.{},
+    map: std.AutoHashMap(u128, payoff.PlayerPayoff) = undefined,
+    active: bool = false,
+    /// Distinct post-equity computations (misses). Hits reuse `map`.
+    miss_count: usize = 0,
+
+    fn packKey(util0: f64, util1: f64) u128 {
+        const a: u64 = @bitCast(util0);
+        const b: u64 = @bitCast(util1);
+        return (@as(u128, a) << 64) | b;
+    }
+
+    pub fn init(allocator: std.mem.Allocator, cfg: IcmConfig) IcmError!TerminalCache {
+        if (!cfg.enabled()) return .{};
+        if (cfg.stacks.len < 2) return error.InvalidIcm;
+        try validateInputs(cfg.stacks, cfg.payouts);
+        const pre = try icmEquities(allocator, cfg.stacks, cfg.payouts);
+        errdefer allocator.free(pre);
+        var map = std.AutoHashMap(u128, payoff.PlayerPayoff).init(allocator);
+        errdefer map.deinit();
+        return .{
+            .allocator = allocator,
+            .cfg = cfg,
+            .pre_eq = pre,
+            .map = map,
+            .active = true,
+        };
+    }
+
+    pub fn deinit(self: *TerminalCache) void {
+        if (!self.active) return;
+        self.map.deinit();
+        if (self.pre_eq.len != 0) self.allocator.free(self.pre_eq);
+        self.* = .{};
+    }
+
+    /// Warm / single-threaded insert path.
+    pub fn apply(self: *TerminalCache, chip_terminal: payoff.PlayerPayoff) IcmError!payoff.PlayerPayoff {
+        if (!self.active) return chip_terminal;
+        const key = packKey(chip_terminal.utility[0], chip_terminal.utility[1]);
+        if (self.map.get(key)) |cached| return cached;
+        const paid = try applyIcmTerminalWithPre(self.allocator, self.cfg, self.pre_eq, chip_terminal);
+        self.map.put(key, paid) catch return error.InvalidIcm;
+        self.miss_count += 1;
+        return paid;
+    }
+
+    /// Read-only lookup for the MT walk after `warmIcmTerminalCache`.
+    pub fn get(self: *const TerminalCache, chip_terminal: payoff.PlayerPayoff) ?payoff.PlayerPayoff {
+        if (!self.active) return null;
+        return self.map.get(packKey(chip_terminal.utility[0], chip_terminal.utility[1]));
+    }
+
+    /// Hit the cache, or compute with pre-equity without mutating the shared map.
+    pub fn getOrCompute(self: *const TerminalCache, chip_terminal: payoff.PlayerPayoff) IcmError!payoff.PlayerPayoff {
+        if (!self.active) return chip_terminal;
+        if (self.get(chip_terminal)) |cached| return cached;
+        return applyIcmTerminalWithPre(self.allocator, self.cfg, self.pre_eq, chip_terminal);
+    }
+};
+
 test "icm two-player bubble" {
     const stacks = [_]f64{ 1000, 1000 };
     const payouts = [_]f64{ 70, 30 };
@@ -188,4 +285,31 @@ test "icm two-player bubble" {
     defer std.testing.allocator.free(eq);
     try std.testing.expectApproxEqAbs(@as(f64, 50.0), eq[0], 1e-9);
     try std.testing.expectApproxEqAbs(@as(f64, 50.0), eq[1], 1e-9);
+}
+
+test "TerminalCache reuses pre-equity and distinct chip terminals" {
+    const stacks = [_]f64{ 1000, 1000, 1000 };
+    const payouts = [_]f64{ 50, 30, 20 };
+    const cfg = IcmConfig{ .stacks = &stacks, .payouts = &payouts };
+    var cache = try TerminalCache.init(std.testing.allocator, cfg);
+    defer cache.deinit();
+    try std.testing.expect(cache.active);
+    try std.testing.expect(cache.pre_eq.len == 3);
+
+    const win = payoff.PlayerPayoff{ .utility = .{ 100, -100 } };
+    const lose = payoff.PlayerPayoff{ .utility = .{ -100, 100 } };
+    const direct_win = try applyIcmTerminal(std.testing.allocator, cfg, win);
+    const cached_win = try cache.apply(win);
+    try std.testing.expectApproxEqAbs(direct_win.utility[0], cached_win.utility[0], 1e-12);
+    try std.testing.expectApproxEqAbs(direct_win.utility[1], cached_win.utility[1], 1e-12);
+    try std.testing.expectEqual(@as(usize, 1), cache.miss_count);
+
+    const again = try cache.apply(win);
+    try std.testing.expectEqual(@as(usize, 1), cache.miss_count);
+    try std.testing.expectApproxEqAbs(cached_win.utility[0], again.utility[0], 0);
+
+    _ = try cache.apply(lose);
+    try std.testing.expectEqual(@as(usize, 2), cache.miss_count);
+    try std.testing.expect(cache.get(win) != null);
+    try std.testing.expect(cache.get(lose) != null);
 }
