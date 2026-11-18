@@ -13,12 +13,14 @@ classic recursive ICM:
    recurse on the remaining stacks with `payouts[1..]`.
 3. When one player remains, they receive the sum of any unpaid remaining
    places. Places past the end of `payouts` are worth 0.
-4. A zero stack at the start of an equity evaluation has already finished
-   from the bottom of the field: it takes the next worst place among the
-   seats in `stacks` (bust this hand → last paid place when that prize
-   exists). Remaining positive stacks contest only the front places.
+4. A zero stack in a **post-hand** equity evaluation busted on this hand and
+   takes the next worst place among the seats in `stacks` (last paid place
+   when that prize exists). Remaining positive stacks contest only the front
+   places.
 
 Rejects empty stacks, negative or non-finite stacks/payouts, and a zero total.
+Solve configs additionally require **every starting stack > 0** (remaining
+field only).
 
 ## Pinned equities
 
@@ -52,16 +54,26 @@ Empty ICM keeps the chip/rake terminal from `chipTerminal` in `engine/src/poker/
 means ICM is off. The betting `stack` field is the effective stack for the
 hand, not the tournament ICM stacks.
 
+Enter only players still in the tournament, with positive stacks, and the
+payout ladder for that remaining field. Do not pad already-out seats as
+zeros: seat-order bust assignment would give them the wrong finishing place
+(example: `150/1500/8350/0` with `50/30/15/5` credits a busted 150 with `5`
+instead of `15`). Omit the out seat and use `150/1500/8350` with `50/30/15`.
+A stack may still hit zero **during** the hand and receive its finishing
+prize via post-hand equity.
+
 `street-config 1` writes `icm-stacks` / `icm-payouts` only when stacks are
 non-empty. Empty or omitted stacks leave the chip/rake path unchanged.
 Malmuth-Harville pins live under `engine/src/poker/icm_rematch_test.zig`.
 
 Study Settings has an ICM switch. With it on, the draft requires at least two
-stacks and writes `icm-stacks` / `icm-payouts` into `street-config 1`. Compile
-validates those arrays (`engine/src/poker/icm.zig`). Empty stacks leave ICM off.
-Do not treat the math pins as a Pio ICM parity claim.
+positive stacks and writes `icm-stacks` / `icm-payouts` into `street-config 1`.
+Compile validates those arrays (`IcmConfig.validate` /
+`validateStartingStacks` in `engine/src/poker/icm.zig`). Empty stacks leave
+ICM off. Do not treat the math pins as a Pio ICM parity claim.
 
-Compile rejects invalid `icm-stacks` and `icm-payouts`.
+Compile rejects invalid `icm-stacks` and `icm-payouts`, including any zero
+starting stack.
 
 ## Solve path
 
