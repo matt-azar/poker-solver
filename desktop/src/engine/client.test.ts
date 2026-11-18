@@ -153,6 +153,7 @@ describe("EngineClient Slice A IPC branches", () => {
       iterations: 200,
       memory_mib: 1024,
       threads: 2,
+      samples: 15,
     });
     expect(reply).toMatchObject({
       running: true,
@@ -161,6 +162,143 @@ describe("EngineClient Slice A IPC branches", () => {
       terminal_reason: "admitted",
       transport: "ipc",
     });
+    expect(client.lastStudyJobId()).toBe("j1");
+    expect(invoke).toHaveBeenNthCalledWith(2, "solver_engine_request", {
+      op: "solve",
+      body: {
+        iterations: 200,
+        samples: 15,
+        launch_id: "t",
+      },
+      jobId: "j1",
+    });
+  });
+
+  it("latches Stop during Build and does not admit train", async () => {
+    let releaseBegin: (() => void) | null = null;
+    const beginGate = new Promise<void>((resolve) => {
+      releaseBegin = resolve;
+    });
+    invoke.mockImplementation(async (cmd: string, args: { op?: string }) => {
+      if (cmd === "solver_engine_request" && args.op === "begin_config") {
+        await beginGate;
+        return okBody("begin_config", { solution_id: 1 });
+      }
+      if (cmd === "solver_engine_request" && args.op === "cancel") {
+        return okBody("cancel", { cancelled: false, reason: "not_running" });
+      }
+      throw new Error(`unexpected ${args.op}`);
+    });
+
+    const pending = client.solve({
+      board: ["Ah", "Kd", "7c"],
+      pot: 100,
+      stack: 200,
+      oop_range: "AA",
+      ip_range: "KK",
+      oop_bets: [],
+      ip_bets: [],
+      iterations: 16,
+      memory_mib: 512,
+      threads: 1,
+    });
+    await Promise.resolve();
+    const stopReply = (await client.stop()) as {
+      cancelled?: boolean;
+      cancel_ack?: { kind?: string; duringBuildHandoff?: boolean };
+    };
+    expect(stopReply.cancel_ack).toMatchObject({
+      kind: "noop_not_running",
+      duringBuildHandoff: true,
+    });
+    releaseBegin?.();
+    await expect(pending).rejects.toMatchObject({
+      message: expect.stringMatching(/cancelled before train/i),
+    });
+    expect(invoke.mock.calls.some((c) => c[1]?.op === "solve")).toBe(false);
+  });
+
+  it("keeps authoritative active job id when a second train is rejected busy", async () => {
+    invoke
+      .mockResolvedValueOnce(okBody("begin_config", { solution_id: 1 }))
+      .mockResolvedValueOnce(
+        okBody("solve", {
+          accepted: true,
+          running: true,
+          solution_id: 1,
+          async: true,
+        }),
+      );
+    await client.solve({
+      board: ["Ah", "Kd", "7c"],
+      pot: 100,
+      stack: 200,
+      oop_range: "AA",
+      ip_range: "KK",
+      oop_bets: [],
+      ip_bets: [],
+      iterations: 10,
+      memory_mib: 512,
+      threads: 1,
+    });
+    expect(client.lastStudyJobId()).toBe("j1");
+
+    invoke.mockResolvedValueOnce(
+      okBody("solve", {
+        accepted: false,
+        running: false,
+        busy: true,
+        error_code: "busy",
+      }),
+    );
+    const rejected = await client.continueSolve("s1", {
+      iterations: 5,
+      samples: 7,
+    });
+    expect(rejected).toMatchObject({
+      running: false,
+      job_id: "j1",
+      terminal_reason: "completed",
+    });
+    expect(client.lastStudyJobId()).toBe("j1");
+    expect(invoke).toHaveBeenLastCalledWith("solver_engine_request", {
+      op: "solve",
+      body: {
+        iterations: 5,
+        samples: 7,
+        solution_id: "s1",
+        launch_id: "t",
+      },
+      jobId: "j2",
+    });
+  });
+
+  it("resets job-local status fields on successful Open", async () => {
+    invoke.mockResolvedValueOnce(
+      okBody("open", {
+        running: false,
+        paused: false,
+        cancelled: false,
+        failed: true,
+        last_error: "stale",
+        iterations: 8,
+        iterations_requested: 48,
+        job_id: "j-old",
+        status_generation: 3,
+        solution_id: "s2",
+        root_node_id: "p0.t-1.r-1",
+        pot: 100,
+      }),
+    );
+    const status = await client.open("/tmp/demo.psol");
+    expect(status.solution_id).toBe("s2");
+    expect(status.iterations).toBe(8);
+    expect(status.pot).toBe(100);
+    expect(status.iterations_requested).toBeNull();
+    expect(status.job_id).toBeNull();
+    expect(status.failed).toBe(false);
+    expect(status.last_error).toBeNull();
+    expect(client.lastStudyJobId()).toBeNull();
   });
 
   it("routes getNode / open / save over IPC", async () => {
