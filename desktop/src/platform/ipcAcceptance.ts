@@ -19,6 +19,10 @@ import { invoke } from "@tauri-apps/api/core";
 // Static import so the packaged Vite bundle always includes window Close/Destroy
 // (a dynamic import can fail in the NSIS WebView and trip exit_with_code(1)).
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import {
+  parseSolverIpcInvokeError,
+  type SolverIpcError,
+} from "../engine/transport";
 import { isTauriRuntime } from "./index";
 
 /** Canonical -Stage / probe names (CI ValidateSet + YAML). */
@@ -234,6 +238,52 @@ export async function runIpcAcceptanceProbe(): Promise<IpcAcceptanceResult> {
 }
 
 /**
+ * Tauri rejects `solver_engine_request` with a structured Rust `IpcError`
+ * object (`{ class, message, phase, … }`), not a plain `Error`. `String(err)`
+ * becomes `[object Object]` and hides timeout/write-bound keywords — that is
+ * why Stage BlockedWrite on tip `3cfda36` armed correctly then burned ~50s on
+ * 2s RPC budgets and exited 1 with "no write/admission bound".
+ */
+export function describeInvokeError(err: unknown, fallbackOp?: string): SolverIpcError {
+  return parseSolverIpcInvokeError(err, fallbackOp);
+}
+
+/** True when the invoke rejection proves a write / admission / pipe bound. */
+export function isWriteOrAdmissionBound(err: unknown, fallbackOp?: string): boolean {
+  const ipc = describeInvokeError(err, fallbackOp);
+  if (
+    ipc.ipcClass === "timeout" ||
+    ipc.ipcClass === "queue_saturation" ||
+    ipc.ipcClass === "connection_loss"
+  ) {
+    return true;
+  }
+  if (ipc.phase === "after_write" || ipc.phase === "before_write") {
+    return true;
+  }
+  const lower = ipc.message.toLowerCase();
+  return (
+    lower.includes("admission saturated") ||
+    lower.includes("queued bytes") ||
+    lower.includes("timed out") ||
+    lower.includes("timeout") ||
+    lower.includes("expired-before-write") ||
+    lower.includes("unknown-after-write") ||
+    lower.includes("after_write") ||
+    lower.includes("connection") ||
+    lower.includes("pipe") ||
+    lower.includes("write:")
+  );
+}
+
+function formatBoundDetail(ipc: SolverIpcError): string {
+  const bits = [ipc.ipcClass, ipc.phase ? `phase=${ipc.phase}` : null, ipc.message].filter(
+    Boolean,
+  );
+  return bits.join(": ");
+}
+
+/**
  * BlockedWrite — prove a genuinely blocked / non-draining write is bounded.
  *
  * Env: STUDY_INSTALLER_E2E=stage-blocked-write
@@ -255,7 +305,7 @@ export async function runBlockedWriteProbe(): Promise<IpcAcceptanceResult> {
     armed = Boolean(await invoke("ipc_blocked_write_armed"));
     extraArgs = (await invoke("solver_engine_extra_args")) as string[];
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = describeInvokeError(err).message;
     return {
       ok: false,
       stage: "BlockedWrite",
@@ -277,9 +327,10 @@ export async function runBlockedWriteProbe(): Promise<IpcAcceptanceResult> {
 
   let sawBound = false;
   let lastDetail = "";
-  // Prefer one large mutating write so write_all can block mid-frame after the
-  // sidecar partial-drains / stops reading (matches Rust mid_frame cargo test).
-  const bigPath = `/tmp/blocked-write-${"x".repeat(64 * 1024)}.psol`;
+  // ~256 KiB path padding matches Rust mid_frame cargo test — exceeds typical
+  // Windows anonymous-pipe buffer so write_all blocks after the sidecar
+  // partial-drains the 4-byte length prefix (real Writing-phase bound).
+  const bigPath = `/tmp/blocked-write-${"x".repeat(256 * 1024)}.psol`;
   try {
     await invoke("solver_engine_request", {
       op: "save",
@@ -287,21 +338,9 @@ export async function runBlockedWriteProbe(): Promise<IpcAcceptanceResult> {
       jobId: null,
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    lastDetail = msg;
-    const lower = msg.toLowerCase();
-    if (
-      lower.includes("admission saturated") ||
-      lower.includes("queued bytes") ||
-      lower.includes("timed out") ||
-      lower.includes("timeout") ||
-      lower.includes("expired-before-write") ||
-      lower.includes("unknown-after-write") ||
-      lower.includes("after_write") ||
-      lower.includes("connection") ||
-      lower.includes("pipe") ||
-      lower.includes("write:")
-    ) {
+    const ipc = describeInvokeError(err, "save");
+    lastDetail = formatBoundDetail(ipc);
+    if (isWriteOrAdmissionBound(err, "save")) {
       sawBound = true;
     }
   }
@@ -315,21 +354,9 @@ export async function runBlockedWriteProbe(): Promise<IpcAcceptanceResult> {
           jobId: null,
         });
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        lastDetail = msg;
-        const lower = msg.toLowerCase();
-        if (
-          lower.includes("admission saturated") ||
-          lower.includes("queued bytes") ||
-          lower.includes("timed out") ||
-          lower.includes("timeout") ||
-          lower.includes("expired-before-write") ||
-          lower.includes("unknown-after-write") ||
-          lower.includes("after_write") ||
-          lower.includes("connection") ||
-          lower.includes("pipe") ||
-          lower.includes("write:")
-        ) {
+        const ipc = describeInvokeError(err, "node");
+        lastDetail = formatBoundDetail(ipc);
+        if (isWriteOrAdmissionBound(err, "node")) {
           sawBound = true;
           break;
         }

@@ -166,6 +166,39 @@ describe("runBlockedWriteProbe", () => {
     expect(result.skipped).toBeFalsy();
     expect(result.detail).toMatch(/bound observed/);
   });
+
+  it("passes on structured Tauri IpcError timeout after_write (not String([object Object]))", async () => {
+    const { runBlockedWriteProbe, isWriteOrAdmissionBound } = await import("./ipcAcceptance");
+    const structured = {
+      class: "timeout",
+      phase: "after_write",
+      message:
+        "unknown-after-write: op save deadline elapsed after write started (do not auto-replay Save/Open/Solve)",
+      op: "save",
+      request_id: "r-blocked",
+      degraded: false,
+    };
+    expect(isWriteOrAdmissionBound(structured, "save")).toBe(true);
+    // Regression: bare String(err) hid the bound on tip 3cfda36.
+    expect(String(structured)).toBe("[object Object]");
+
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "ipc_blocked_write_armed") return true;
+      if (cmd === "solver_engine_extra_args") {
+        return ["--stop-reading-after", "0", "--partial-drain-bytes", "4"];
+      }
+      if (cmd === "solver_engine_request") {
+        throw structured;
+      }
+      if (cmd === "solver_engine_info") return { launchId: "L1" };
+      if (cmd === "kill_solver_engine_cmd") return null;
+      throw new Error(`unexpected invoke ${cmd}`);
+    });
+    const result = await runBlockedWriteProbe();
+    expect(result.ok).toBe(true);
+    expect(result.skipped).toBeFalsy();
+    expect(result.detail).toMatch(/after_write|unknown-after-write/);
+  });
 });
 
 describe("runStaleCallAfterReconnectProbe", () => {

@@ -233,7 +233,14 @@ describe("maybeRunInstallerE2eAndExit IPC probe stages", () => {
         return ["--stop-reading-after", "0", "--partial-drain-bytes", "4"];
       }
       if (cmd === "solver_engine_request") {
-        throw new Error("unknown-after-write: op save");
+        // Match real Tauri invoke Err (structured IpcError), not plain Error.
+        throw {
+          class: "timeout",
+          phase: "after_write",
+          message: "unknown-after-write: op save deadline elapsed after write started",
+          op: "save",
+          degraded: false,
+        };
       }
       if (cmd === "solver_engine_info") return { launchId: "L1" };
       if (cmd === "kill_solver_engine_cmd") return null;
