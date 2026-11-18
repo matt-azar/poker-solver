@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   abbreviateActionLine,
   potFacingAfterPath,
@@ -8,9 +8,48 @@ import type {
   MemoryPlanPayload,
   TreePreviewAction,
   TreePreviewNode,
-  TreePreviewPayload,
 } from "../../domain/types";
 import { useStudyStore } from "../../state/studyStore";
+import { useTreePreviewPlan } from "./useTreePreviewPlan";
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1048576) {
+    return `${(bytes / 1024).toFixed(1)} KiB`;
+  }
+  return `${(bytes / 1048576).toFixed(1)} MiB`;
+}
+
+function MemoryPlanStrip({
+  plan,
+  pot,
+  stack,
+}: {
+  plan: MemoryPlanPayload;
+  pot: number;
+  stack: number;
+}) {
+  return (
+    <div
+      className="memory-plan"
+      data-over-budget={plan.fits_budget ? undefined : "true"}
+    >
+      <span>
+        Plan peak {formatBytes(plan.estimated_peak_bytes)}
+        {plan.fits_budget ? "" : " (over budget)"}
+      </span>
+      <span>
+        Budget {formatBytes(plan.memory_budget_bytes)} · {plan.public_decisions}{" "}
+        decisions · {plan.deals} deals
+      </span>
+      <span className="tree-meta">
+        pot {pot} · stack {stack}
+      </span>
+    </div>
+  );
+}
 
 /** Display labels → compact TreeEdit tokens (no spaces) for street-config text. */
 function compactLabel(label: string): string {
@@ -249,27 +288,28 @@ function abbreviatePathForMeta(path: string, rootPot: number): string {
   return abbreviateActionLine(path, rootPot);
 }
 
-export type TreePreviewPlanState = {
-  preview: TreePreviewPayload | null;
-  plan: MemoryPlanPayload | null;
-  error: string;
-  busy: boolean;
-  refresh: () => Promise<void>;
-};
-
 interface TreeLineEditorProps {
-  /** Shared preview from Build Solve bar — single tree_preview poll owner. */
-  previewState: TreePreviewPlanState;
+  /** When true, Build header owns the MemoryPlanStrip (avoids duplicate chrome). */
+  hideMemoryStrip?: boolean;
+  /** Notify Build header of the latest memory plan from the single tree_preview poll. */
+  onPlanChange?: (plan: MemoryPlanPayload | null) => void;
 }
 
-export function TreeLineEditor({ previewState }: TreeLineEditorProps) {
+export function TreeLineEditor({
+  hideMemoryStrip = false,
+  onPlanChange,
+}: TreeLineEditorProps = {}) {
   const draft = useStudyStore((s) => s.draft);
   const updateDraft = useStudyStore((s) => s.updateDraft);
-  const { preview, error, busy, refresh } = previewState;
+  const { preview, plan, error, busy, refresh } = useTreePreviewPlan();
   const [open, setOpen] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [addSizePath, setAddSizePath] = useState<string | null>(null);
   const [addSizeValue, setAddSizeValue] = useState("0.33");
+
+  useEffect(() => {
+    onPlanChange?.(plan);
+  }, [plan, onPlanChange]);
 
   const appendEdit = (line: string) => {
     if (draft.treeEdits.includes(line)) {
@@ -295,6 +335,9 @@ export function TreeLineEditor({ previewState }: TreeLineEditorProps) {
 
   return (
     <section className="build-section tree-editor" data-span="2" aria-label="Advanced tree">
+      {!hideMemoryStrip && plan ? (
+        <MemoryPlanStrip plan={plan} pot={draft.pot} stack={draft.stack} />
+      ) : null}
       <div className="panel-title-row">
         <h2>
           <button

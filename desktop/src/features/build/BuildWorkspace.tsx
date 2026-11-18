@@ -12,13 +12,13 @@ import {
 import { formatSizeListPreview } from "../../domain/betSizes";
 import { draftFromBuild } from "../../domain/equity/transfer";
 import { comboCount } from "../../domain/range";
+import type { MemoryPlanPayload } from "../../domain/types";
 import { RANKS } from "../../domain/types";
 import { useEquityStore } from "../../state/equityStore";
 import { useStudyStore } from "../../state/studyStore";
 import { BettingTreeCatalogue } from "./BettingTreeCatalogue";
 import { SeatActionCatalogueTree } from "./SeatActionCatalogueTree";
 import { TreeLineEditor } from "./TreeLineEditor";
-import { useTreePreviewPlan } from "./useTreePreviewPlan";
 
 function provenanceHint(
   setupMeta: ReturnType<typeof useStudyStore.getState>["setupMeta"],
@@ -196,36 +196,37 @@ function SizeField({
   );
 }
 
+function formatPlanBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1048576) {
+    return `${(bytes / 1024).toFixed(1)} KiB`;
+  }
+  return `${(bytes / 1048576).toFixed(1)} MiB`;
+}
+
 function MemoryPlanStrip({
   plan,
   pot,
   stack,
 }: {
-  plan: NonNullable<ReturnType<typeof useTreePreviewPlan>["plan"]>;
+  plan: MemoryPlanPayload;
   pot: number;
   stack: number;
 }) {
-  const formatBytes = (bytes: number) => {
-    if (bytes < 1024) {
-      return `${bytes} B`;
-    }
-    if (bytes < 1048576) {
-      return `${(bytes / 1024).toFixed(1)} KiB`;
-    }
-    return `${(bytes / 1048576).toFixed(1)} MiB`;
-  };
   return (
     <div
       className="memory-plan"
       data-over-budget={plan.fits_budget ? undefined : "true"}
     >
       <span>
-        Plan peak {formatBytes(plan.estimated_peak_bytes)}
+        Plan peak {formatPlanBytes(plan.estimated_peak_bytes)}
         {plan.fits_budget ? "" : " (over budget)"}
       </span>
       <span>
-        Budget {formatBytes(plan.memory_budget_bytes)} · {plan.public_decisions}{" "}
-        decisions · {plan.deals} deals
+        Budget {formatPlanBytes(plan.memory_budget_bytes)} ·{" "}
+        {plan.public_decisions} decisions · {plan.deals} deals
       </span>
       <span className="tree-meta">
         pot {pot} · stack {stack}
@@ -257,8 +258,7 @@ export function BuildWorkspace() {
   const solve = useStudyStore((s) => s.solve);
   const potProvenance = provenanceHint(setupMeta, "pot");
   const stackProvenance = provenanceHint(setupMeta, "stack");
-  const previewState = useTreePreviewPlan();
-  const { plan } = previewState;
+  const [plan, setPlan] = useState<MemoryPlanPayload | null>(null);
 
   const solveGate = canExecuteSolve(
     studyCommandContextFromStore({
@@ -867,7 +867,7 @@ export function BuildWorkspace() {
         </section>
       </div>
 
-      <TreeLineEditor previewState={previewState} />
+      <TreeLineEditor hideMemoryStrip onPlanChange={setPlan} />
     </div>
   );
 }
