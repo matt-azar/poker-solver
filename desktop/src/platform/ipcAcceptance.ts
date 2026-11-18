@@ -349,7 +349,19 @@ export async function runNormalClosePendingProbe(): Promise<IpcAcceptanceResult>
     }).catch(() => {});
   }
 
-  const win = getCurrentWindow();
+  // Requires core:window:allow-close (+ allow-destroy fallback) in capabilities.
+  let win;
+  try {
+    win = getCurrentWindow();
+  } catch (err: unknown) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      stage: "NormalClosePending",
+      detail: `getCurrentWindow() failed: ${detail}`,
+    };
+  }
+
   try {
     await win.close();
     return {
@@ -371,10 +383,16 @@ export async function runNormalClosePendingProbe(): Promise<IpcAcceptanceResult>
     } catch (destroyErr: unknown) {
       const destroyDetail =
         destroyErr instanceof Error ? destroyErr.message : String(destroyErr);
+      const aclHint =
+        /not allowed|forbidden|denied|ACL|permission/i.test(
+          `${closeDetail} ${destroyDetail}`,
+        )
+          ? " (check capabilities: core:window:allow-close + allow-destroy)"
+          : "";
       return {
         ok: false,
         stage: "NormalClosePending",
-        detail: `normal window Close/destroy failed: close=${closeDetail}; destroy=${destroyDetail}`,
+        detail: `normal window Close/destroy failed: close=${closeDetail}; destroy=${destroyDetail}${aclHint}`,
       };
     }
   }
