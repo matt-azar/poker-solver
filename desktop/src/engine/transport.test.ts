@@ -214,6 +214,121 @@ describe("analysis IPC serialization", () => {
     await Promise.all([valuesPromise, equityPromise]);
     expect(order).toEqual(["values-start", "values-end", "equity"]);
   });
+
+  it("drops aborted equity queued behind held values without transport send", async () => {
+    const order: string[] = [];
+    let releaseValues!: () => void;
+    const valuesGate = new Promise<void>((resolve) => {
+      releaseValues = resolve;
+    });
+    invoke.mockImplementation(async (_cmd: string, args: { op?: string }) => {
+      const op = args?.op ?? "";
+      if (op === "values") {
+        order.push("values-start");
+        await valuesGate;
+        order.push("values-end");
+        return {
+          v: 2,
+          kind: "reply",
+          request_id: "v",
+          op: "values",
+          ok: true,
+          body: { pending: false },
+        };
+      }
+      if (op === "equity") {
+        order.push("equity");
+        return {
+          v: 2,
+          kind: "reply",
+          request_id: "e",
+          op: "equity",
+          ok: true,
+          body: { pending: false, equity: [0.5] },
+        };
+      }
+      throw new Error(`unexpected op ${op}`);
+    });
+
+    const controller = new AbortController();
+    const valuesPromise = ipcValues("root");
+    await Promise.resolve();
+    const equityPromise = ipcEquity({ nodeId: "root", signal: controller.signal });
+    await vi.waitFor(() => expect(order).toContain("values-start"));
+    expect(order).not.toContain("equity");
+
+    controller.abort();
+    releaseValues();
+
+    await expect(valuesPromise).resolves.toMatchObject({ pending: false });
+    await expect(equityPromise).rejects.toMatchObject({ name: "AbortError" });
+    expect(order).toEqual(["values-start", "values-end"]);
+    expect(order).not.toContain("equity");
+  });
+
+  it("still admits a later values job after an aborted mid-queue equity drop", async () => {
+    const order: string[] = [];
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    invoke.mockImplementation(async (_cmd: string, args: { op?: string }) => {
+      const op = args?.op ?? "";
+      if (op === "values") {
+        const label = order.includes("values-first-start")
+          ? "values-second"
+          : "values-first";
+        if (label === "values-first") {
+          order.push("values-first-start");
+          await firstGate;
+          order.push("values-first-end");
+        } else {
+          order.push("values-second");
+        }
+        return {
+          v: 2,
+          kind: "reply",
+          request_id: label,
+          op: "values",
+          ok: true,
+          body: { pending: false, node_id: label },
+        };
+      }
+      if (op === "equity") {
+        order.push("equity");
+        return {
+          v: 2,
+          kind: "reply",
+          request_id: "e",
+          op: "equity",
+          ok: true,
+          body: { pending: false },
+        };
+      }
+      throw new Error(`unexpected op ${op}`);
+    });
+
+    const controller = new AbortController();
+    const firstValues = ipcValues("root");
+    await Promise.resolve();
+    const equityPromise = ipcEquity({ nodeId: "stale", signal: controller.signal });
+    await Promise.resolve();
+    const secondValues = ipcValues("nav");
+    await vi.waitFor(() => expect(order).toContain("values-first-start"));
+
+    controller.abort();
+    releaseFirst();
+
+    await expect(firstValues).resolves.toMatchObject({ node_id: "values-first" });
+    await expect(equityPromise).rejects.toMatchObject({ name: "AbortError" });
+    await expect(secondValues).resolves.toMatchObject({ node_id: "values-second" });
+    expect(order).toEqual([
+      "values-first-start",
+      "values-first-end",
+      "values-second",
+    ]);
+    expect(order).not.toContain("equity");
+  });
 });
 
 describe("Slice A IPC lifecycle + node helpers", () => {

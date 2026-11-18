@@ -10,8 +10,9 @@ vi.mock("../platform", () => ({
   isTauriRuntime: () => true,
 }));
 
-import { EngineClient } from "./client";
+import { EngineClient, EngineError } from "./client";
 import {
+  resetAnalysisIpcSerialForTests,
   resetStudyJobIdCounterForTests,
   setNoEngineTransport,
   setIpcTransport,
@@ -915,5 +916,69 @@ describe("EngineClient ZR-103 getCategories / compare IPC", () => {
       },
       jobId: null,
     });
+  });
+});
+
+describe("EngineClient analysis mid-queue abort drop", () => {
+  let client: EngineClient;
+
+  beforeEach(() => {
+    invoke.mockReset();
+    resetAnalysisIpcSerialForTests();
+    client = new EngineClient({ baseUrl: "http://unused" });
+    setIpcTransport({ protocol: 2, launchId: "t", sidecar: "solver-engine", workers: 1 });
+  });
+
+  it("does not send equity aborted while queued behind held values", async () => {
+    const ops: string[] = [];
+    let releaseValues!: () => void;
+    const valuesGate = new Promise<void>((resolve) => {
+      releaseValues = resolve;
+    });
+    invoke.mockImplementation(async (_cmd: string, args: { op?: string }) => {
+      const op = args?.op ?? "";
+      ops.push(op);
+      if (op === "values") {
+        await valuesGate;
+        return okBody("values", {
+          pending: false,
+          solution_id: "s1",
+          node_id: "p0.t-1.r-1",
+          actions: ["Check"],
+          value: [0],
+        });
+      }
+      if (op === "equity") {
+        return okBody("equity", {
+          pending: false,
+          solution_id: "s1",
+          node_id: "p0.t-1.r-1",
+          equity: [0.5],
+        });
+      }
+      throw new Error(`unexpected op ${op}`);
+    });
+
+    const controller = new AbortController();
+    const valuesPromise = client.getValues("s1", "p0.t-1.r-1");
+    await Promise.resolve();
+    const equityPromise = client.getEquity("s1", "p0.t-1.r-1", controller.signal);
+    await vi.waitFor(() => expect(ops).toContain("values"));
+    expect(ops).not.toContain("equity");
+
+    controller.abort();
+    releaseValues();
+
+    await expect(valuesPromise).resolves.toMatchObject({
+      solution_id: "s1",
+      node_id: "p0.t-1.r-1",
+    });
+    await expect(equityPromise).rejects.toBeInstanceOf(EngineError);
+    await expect(equityPromise).rejects.toMatchObject({
+      name: "EngineError",
+      status: 0,
+      message: expect.stringMatching(/^aborted$/i),
+    });
+    expect(ops).toEqual(["values"]);
   });
 });
