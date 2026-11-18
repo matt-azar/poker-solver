@@ -343,9 +343,11 @@ const eof_test_river_config =
 
 /// Background train that honors Session.requestStop (mirrors product trainWorker
 /// without writing an admit frame to stdout — which deadlocks under zig test).
+/// Iteration budget is intentionally huge: a tiny check-only river can finish
+/// 50k gated steps in a few ms on CI, racing EOF before cancel is observed.
 const EofTrainSim = struct {
     state: *dispatch.HostState,
-    iterations: i32,
+    iterations: i32 = 2_000_000,
     saw_stop_before_exit: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
     fn run(self: *@This()) void {
@@ -359,7 +361,9 @@ const EofTrainSim = struct {
             }
             self.state.job_mu.unlock();
         }
-        self.state.session.trainGated(self.iterations, 0, 1, -1) catch {};
+        // eval_every large: progress sampling is not under test; keep the loop
+        // on train(1)+stop checks so cancel stays responsive.
+        self.state.session.trainGated(self.iterations, 0, 10_000, -1) catch {};
         // trainGated clears stop_requested on cancel; last_terminal is the
         // durable observation that stop was honored before join returned.
         if (self.state.session.last_terminal == .cancelled) {
@@ -385,6 +389,20 @@ fn waitUntilTrainRunning(state: *dispatch.HostState, timeout_ns: u64) !void {
     try std.testing.expect(state.matchesActiveJob("eof-train"));
 }
 
+/// Wait until the sim has committed at least one gated train step (post-admission).
+fn waitUntilTrainProgress(state: *dispatch.HostState, min_trained: i32, timeout_ns: u64) !void {
+    const start = std.time.nanoTimestamp();
+    while (true) {
+        state.session.mu.lock();
+        const trained: i32 = if (state.session.training) |*tr| tr.trained else state.session.last_committed_trained;
+        state.session.mu.unlock();
+        if (trained >= min_trained) return;
+        if (!state.train_running.load(.acquire)) return error.TrainExitedEarly;
+        if (@as(u64, @intCast(std.time.nanoTimestamp() - start)) > timeout_ns) return error.Timeout;
+        std.Thread.yield() catch {};
+    }
+}
+
 test {
     _ = ipc;
     _ = dispatch;
@@ -403,9 +421,10 @@ test "parent EOF signals stop and cancels active job before join" {
     try state.session.begin(eof_test_river_config);
     try state.session.train(1);
 
-    var sim = EofTrainSim{ .state = &state, .iterations = 50_000 };
+    var sim = EofTrainSim{ .state = &state };
     try spawnEofTrainSim(&state, &sim);
     try waitUntilTrainRunning(&state, 2 * std.time.ns_per_s);
+    try waitUntilTrainProgress(&state, 1, 2 * std.time.ns_per_s);
 
     // Capture per-metric analysis gens + preview gen so EOF supersession is visible.
     var analysis_gens_before: [state.analysis_kind_gen.len]u64 = undefined;
@@ -427,7 +446,7 @@ test "parent EOF signals stop and cancels active job before join" {
         try std.testing.expect(gen.load(.acquire) > before);
     }
     try std.testing.expect(state.preview_gen.load(.acquire) > preview_before);
-    // Cooperative stop must not wait out a 50k-iter train (product hang risk).
+    // Cooperative stop must not wait out the multi-million-iter budget.
     try std.testing.expect(elapsed_ns < 5 * std.time.ns_per_s);
 }
 
@@ -440,9 +459,10 @@ test "Stop-first then parent EOF join is prompt on Linux" {
     try state.session.begin(eof_test_river_config);
     try state.session.train(1);
 
-    var sim = EofTrainSim{ .state = &state, .iterations = 50_000 };
+    var sim = EofTrainSim{ .state = &state };
     try spawnEofTrainSim(&state, &sim);
     try waitUntilTrainRunning(&state, 2 * std.time.ns_per_s);
+    try waitUntilTrainProgress(&state, 1, 2 * std.time.ns_per_s);
 
     // Explicit Stop path (same latch cancel uses).
     try state.cancelJob("eof-train");
@@ -472,11 +492,12 @@ test "parent EOF after confirmed admission stops faster than full train" {
     try state.session.begin(eof_test_river_config);
     try state.session.train(1);
 
-    var sim = EofTrainSim{ .state = &state, .iterations = 50_000 };
+    var sim = EofTrainSim{ .state = &state };
     try spawnEofTrainSim(&state, &sim);
     try waitUntilTrainRunning(&state, 2 * std.time.ns_per_s);
-    // Let a few iterations start so this is post-admission, not pre-train.
-    std.Thread.sleep(5 * std.time.ns_per_ms);
+    // Post-admission: at least one gated step before EOF (fixed sleeps race a
+    // completed 50k budget on this tiny river).
+    try waitUntilTrainProgress(&state, 2, 2 * std.time.ns_per_s);
 
     const t0 = std.time.nanoTimestamp();
     shutdownOnParentEof(&state);
@@ -485,11 +506,11 @@ test "parent EOF after confirmed admission stops faster than full train" {
     try std.testing.expect(sim.saw_stop_before_exit.load(.acquire));
     try std.testing.expect(state.train_thread == null);
     try std.testing.expect(elapsed_ns < 5 * std.time.ns_per_s);
-    // Trained count must be far below the 50k target if stop was honored.
+    // Trained count must be far below the multi-million budget if stop was honored.
     state.session.mu.lock();
     const trained: i32 = if (state.session.training) |*tr| tr.trained else state.session.last_committed_trained;
     state.session.mu.unlock();
-    try std.testing.expect(trained < 50_000);
+    try std.testing.expect(trained < 100_000);
 }
 
 test "parent EOF shuts down equity jobs and joins idle workers" {

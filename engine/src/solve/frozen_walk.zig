@@ -7,6 +7,7 @@ const std = @import("std");
 const card = @import("../poker/card.zig");
 const hand_eval = @import("../poker/hand_eval.zig");
 const payoff = @import("../poker/payoff.zig");
+const icm = @import("../poker/icm.zig");
 const range_mod = @import("../poker/range.zig");
 const compile = @import("../game/compile.zig");
 const regret_matching = @import("regret_matching.zig");
@@ -1164,6 +1165,30 @@ pub const FrozenCtx = struct {
         }
     }
 
+    /// Chip+rake → optional ICM → path incentives. Matches `kernel.terminalPayoff`.
+    /// Empty ICM is a no-alloc fast path; ICM for ≤16 seats is stack-buffered.
+    fn modeledTerminal(
+        self: *const FrozenCtx,
+        node: compile.Node,
+        folded: i32,
+        outcome: i32,
+    ) FrozenError!payoff.PlayerPayoff {
+        const chips_pay = try payoff.chipTerminal(
+            self.game.pot,
+            node.contrib[0],
+            node.contrib[1],
+            folded,
+            outcome,
+            self.game.rake,
+        );
+        var paid = icm.applyIcmTerminal(self.allocator, self.game.icmConfig(), chips_pay) catch {
+            return error.InvalidFrozen;
+        };
+        paid.utility[0] += node.incentive_u0;
+        paid.utility[1] += node.incentive_u1;
+        return paid;
+    }
+
     /// `needed_player`: -1 both seats; 0 only ev0; 1 only ev1.
     /// Unilateral BR eval only consumes the responding seat's utility, so skip the
     /// other showdown/fold side (C++ still computes both; Zig may skip).
@@ -1189,16 +1214,7 @@ pub const FrozenCtx = struct {
         @memset(ev1, 0);
 
         if (node.folded >= 0) {
-            var paid = try payoff.chipTerminal(
-                self.game.pot,
-                node.contrib[0],
-                node.contrib[1],
-                node.folded,
-                0,
-                self.game.rake,
-            );
-            paid.utility[0] += node.incentive_u0;
-            paid.utility[1] += node.incentive_u1;
+            const paid = try self.modeledTerminal(node, node.folded, 0);
             if (need0) {
                 const total1 = self.collectReach(w, 1, pi1, w.amount1, &w.by_card1);
                 for (w.idx0[0..w.idx0_len]) |h0u| {
@@ -1225,16 +1241,16 @@ pub const FrozenCtx = struct {
         if (need1) _ = self.collectReach(w, 0, pi0, w.amount0, null);
 
         const win_u = blk: {
-            const p = try payoff.chipTerminal(self.game.pot, node.contrib[0], node.contrib[1], -1, 1, self.game.rake);
-            break :blk [2]f64{ p.utility[0] + node.incentive_u0, p.utility[1] + node.incentive_u1 };
+            const p = try self.modeledTerminal(node, -1, 1);
+            break :blk p.utility;
         };
         const lose_u = blk: {
-            const p = try payoff.chipTerminal(self.game.pot, node.contrib[0], node.contrib[1], -1, -1, self.game.rake);
-            break :blk [2]f64{ p.utility[0] + node.incentive_u0, p.utility[1] + node.incentive_u1 };
+            const p = try self.modeledTerminal(node, -1, -1);
+            break :blk p.utility;
         };
         const tie_u = blk: {
-            const p = try payoff.chipTerminal(self.game.pot, node.contrib[0], node.contrib[1], -1, 0, self.game.rake);
-            break :blk [2]f64{ p.utility[0] + node.incentive_u0, p.utility[1] + node.incentive_u1 };
+            const p = try self.modeledTerminal(node, -1, 0);
+            break :blk p.utility;
         };
 
         if (need0) {

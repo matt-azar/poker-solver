@@ -63,10 +63,20 @@ Compile rejects invalid `icm-stacks` and `icm-payouts`.
 ## Solve path
 
 When ICM stacks are present, chip/rake terminals are wrapped with the
-chip→ICM delta (`applyIcmTerminal` in `engine/src/poker/icm.zig`, called from
-`engine/src/kernel/terminal.zig`). Empty ICM keeps the chip/rake terminal.
-HU WTA fold and check-down pins match the examples above (chip `+50` → ICM
-`+2.5` on equal 1000 stacks with prize 100).
+chip→ICM delta (`applyIcmTerminal` in `engine/src/poker/icm.zig`). That wrap
+runs on every product terminal path:
+
+| Path | Entry |
+| --- | --- |
+| Deal-by-deal CFR / `rootValue` | `engine/src/kernel/terminal.zig` via `traversal.zig` |
+| Production frozen CFR+ train + BR / NashConv | `FrozenCtx.modeledTerminal` in `engine/src/solve/frozen_walk.zig` |
+| Conditional action EV fold-now | `engine/src/analysis/action_ev.zig` |
+
+Empty ICM keeps the chip/rake terminal. HU WTA fold and check-down pins match
+the examples above (chip `+50` → ICM `+2.5` on equal 1000 stacks with prize
+100). Multiway bubble pins (`engine/src/solve/frozen_icm_rematch_test.zig`)
+catch a frozen walk that skipped ICM and trained chip Call when prize EV
+preferred Fold.
 
 Regret uses each seat's own utility. NashConv is the sum of the two
 unilateral gains, `(br0-u0)+(br1-u1)`, including when ICM or rake makes the
