@@ -11,7 +11,6 @@ import {
   type HandFilter,
   type HandSort,
 } from "./CompareHandsTable";
-import "../../styles/compare.css";
 
 export function CompareWorkspace() {
   const compareNote = useStudyStore((s) => s.compareNote);
@@ -134,77 +133,18 @@ export function CompareWorkspace() {
       {missingBaseline ? (
         <div className="compare-empty" role="status">
           <h2>No baseline</h2>
-          <p>
-            Resolve locked from Node Locking to create a baseline, or open a
-            study that already has one.
-          </p>
-          <div className="compare-empty__actions">
-            <button
-              type="button"
-              className="toolbar-btn primary"
-              onClick={() => setWorkspace("study")}
-            >
-              Open Study
-            </button>
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={() => setWorkspace("build")}
-            >
-              Create study
-            </button>
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={() => setWorkspace("library")}
-            >
-              Open Library
-            </button>
-          </div>
         </div>
       ) : !solutionId ? (
         <div className="compare-empty" role="status">
           <h2>No solution</h2>
-          <p>Open or create a study to compare against the baseline.</p>
-          <div className="compare-empty__actions">
-            <button
-              type="button"
-              className="toolbar-btn primary"
-              onClick={() => setWorkspace("library")}
-            >
-              Open Library
-            </button>
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={() => setWorkspace("build")}
-            >
-              Create study
-            </button>
-          </div>
         </div>
       ) : !nodeId ? (
         <div className="compare-empty" role="status">
           <h2>No decision node</h2>
-          <p>Browse to a decision in Study, then return to Compare.</p>
-          <div className="compare-empty__actions">
-            <button
-              type="button"
-              className="toolbar-btn primary"
-              onClick={() => setWorkspace("study")}
-            >
-              Open Study
-            </button>
-          </div>
         </div>
       ) : noteValid && compareNote ? (
         <>
-          <CompareHeader
-            note={compareNote}
-            lineLabel={
-              typeof currentNode?.line === "string" ? currentNode.line : null
-            }
-          />
+          <CompareHeader note={compareNote} />
           {message && /compare|arity|disagree|baseline|scenario/i.test(message) ? (
             <p className="compare-store-message" role="status">
               {message}

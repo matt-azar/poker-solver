@@ -33,18 +33,6 @@
   display: none;
 }
 
-/* Root / sparse history: one compact row so the matrix sits higher. */
-.path-nav[data-sparse="true"] {
-  height: auto;
-  min-height: 40px;
-  max-height: 52px;
-  padding: 2px 0 4px;
-}
-
-.path-nav[data-sparse="true"] .resize-handle {
-  display: none;
-}
-
 .path-nav__row {
   display: flex;
   align-items: center;

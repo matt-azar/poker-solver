@@ -72,10 +72,10 @@ export function StrategyEditDrawer() {
   }
 
   return (
-    <aside className="lock-drawer strategy-edit-drawer" aria-label="Session strategy edit">
+    <aside className="lock-drawer strategy-edit-drawer" aria-label="Strategy editor">
       <div className="lock-drawer__header">
         <div>
-          <h2 className="panel-title">Session strategy edit</h2>
+          <h2 className="panel-title">Strategy editor</h2>
           <p className="lock-drawer__node muted">
             {currentNode ? (
               <>
@@ -89,10 +89,6 @@ export function StrategyEditDrawer() {
             ) : (
               "No node loaded"
             )}
-          </p>
-          <p className="empty-hint" style={{ marginTop: 6 }}>
-            Edits the stored strategy for this session — not a re-solve lock
-            constraint.
           </p>
           {!editsAvailable ? (
             <p className="empty-hint" role="status" style={{ marginTop: 8 }}>

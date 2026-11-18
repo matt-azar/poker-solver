@@ -17,23 +17,22 @@ export const DEFAULT_LAYOUT: StudyLayout = {
   // Closed until the player opens an analysis tab, so the matrix owns the page.
   lowerDock: false,
   dualRange: false,
-  // Bound to Actions + Hands content; wide screens must not leave a huge empty rail.
-  inspectorWidth: 320,
-  historyHeight: 56,
+  inspectorWidth: 280,
+  historyHeight: 72,
   lowerDockHeight: 200,
   matrixWidth: null,
   density: "comfortable",
 };
 
 const DOCK_MIN = 120;
-const HISTORY_MIN = 40;
+const HISTORY_MIN = 56;
 
 function dockMaxPx(): number {
   if (typeof window === "undefined") {
-    return 480;
+    return 1200;
   }
-  // Open dock is in-flow under the matrix: keep at least ~55% of the window for Study chrome + grid.
-  return Math.max(DOCK_MIN, Math.floor(window.innerHeight * 0.4));
+  // The open dock overlays the chart, so it may cover most of the study page.
+  return Math.max(DOCK_MIN, window.innerHeight - 96);
 }
 
 function historyMaxPx(): number {
@@ -76,8 +75,8 @@ function sanitizeLayout(raw: Partial<StudyLayout> & { leftNav?: unknown }): Stud
       Number(merged.historyHeight) || DEFAULT_LAYOUT.historyHeight,
     ),
     inspectorWidth: Math.min(
-      420,
-      Math.max(260, Number(merged.inspectorWidth) || DEFAULT_LAYOUT.inspectorWidth),
+      520,
+      Math.max(220, Number(merged.inspectorWidth) || DEFAULT_LAYOUT.inspectorWidth),
     ),
     matrixWidth: clampMatrixWidth(merged.matrixWidth),
     density: merged.density === "compact" ? "compact" : "comfortable",

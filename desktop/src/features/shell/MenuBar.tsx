@@ -205,12 +205,6 @@ export function MenuBar({
           setOpen={setOpenMenu}
           items={[
             {
-              label: "New solution",
-              onClick: () => {
-                onWorkspace("build");
-              },
-            },
-            {
               label: "Open solution…",
               onClick: () => {
                 openCatalogue("open");
@@ -318,7 +312,7 @@ export function MenuBar({
               title: lockGate.reason,
             },
             {
-              label: "Session strategy edit…",
+              label: "Open strategy editor",
               onClick: () =>
                 executeOpenStrategyEditor({
                   ...commandDeps(),

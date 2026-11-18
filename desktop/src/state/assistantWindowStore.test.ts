@@ -43,13 +43,4 @@ describe("assistantWindowStore", () => {
     expect(layout.width).toBeGreaterThanOrEqual(280);
     expect(layout.height).toBeGreaterThanOrEqual(240);
   });
-
-  it("persists dock vs float placement", () => {
-    useHelpChatStore.getState().setPlacement("dock");
-    expect(useHelpChatStore.getState().layout.placement).toBe("dock");
-    const raw = localStorage.getItem("holdem-study-help-chat-v1");
-    expect(raw).toMatch(/"placement":"dock"/);
-    useHelpChatStore.getState().setPlacement("float");
-    expect(useHelpChatStore.getState().layout.placement).toBe("float");
-  });
 });

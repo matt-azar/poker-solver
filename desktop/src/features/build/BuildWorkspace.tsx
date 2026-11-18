@@ -1,21 +1,17 @@
 /**
- * Build page — spot, ranges, betting tree, solve.
+ * Build page — ranges, board, tree sizes, solve.
  * Paint-grid / section chrome: styles/layout.css (.build-*, .range-paint-grid, .paint-cell).
  * Catalogue tree: SeatActionCatalogueTree (+ .seat-tree* in layout.css).
  */
 import { useEffect, useRef, useState } from "react";
 import {
   canExecuteSolve,
-  executeSolve,
   studyCommandContextFromStore,
 } from "../../commands/studyCommands";
-import { formatSizeListPreview } from "../../domain/betSizes";
-import { draftFromBuild } from "../../domain/equity/transfer";
-import { comboCount } from "../../domain/range";
-import type { MemoryPlanPayload } from "../../domain/types";
-import { RANKS } from "../../domain/types";
-import { useEquityStore } from "../../state/equityStore";
 import { useStudyStore } from "../../state/studyStore";
+import { useEquityStore } from "../../state/equityStore";
+import { draftFromBuild } from "../../domain/equity/transfer";
+import { RANKS } from "../../domain/types";
 import { BettingTreeCatalogue } from "./BettingTreeCatalogue";
 import { SeatActionCatalogueTree } from "./SeatActionCatalogueTree";
 import { TreeLineEditor } from "./TreeLineEditor";
@@ -58,16 +54,6 @@ export function formatPaintCellWeight(weight: number): string | null {
     return null;
   }
   return weight.toFixed(2);
-}
-
-function formatComboCount(count: number): string {
-  if (!Number.isFinite(count) || count <= 0) {
-    return "0 combos";
-  }
-  const rounded = Math.round(count * 100) / 100;
-  return Number.isInteger(rounded)
-    ? `${rounded} combos`
-    : `${rounded.toFixed(2)} combos`;
 }
 
 function RangePaintGrid({ player }: { player: "oop" | "ip" }) {
@@ -167,74 +153,6 @@ function RangePaintGrid({ player }: { player: "oop" | "ip" }) {
   );
 }
 
-function SizeField({
-  label,
-  value,
-  onChange,
-  hideCaption = false,
-}: {
-  label: string;
-  value: string;
-  onChange: (next: string) => void;
-  hideCaption?: boolean;
-}) {
-  const preview = formatSizeListPreview(value);
-  return (
-    <label className="build-size-field">
-      {hideCaption ? null : label}
-      <input
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        aria-label={label}
-      />
-      {preview ? (
-        <span className="build-size-preview" aria-live="polite">
-          {preview}
-        </span>
-      ) : null}
-    </label>
-  );
-}
-
-function formatPlanBytes(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  if (bytes < 1048576) {
-    return `${(bytes / 1024).toFixed(1)} KiB`;
-  }
-  return `${(bytes / 1048576).toFixed(1)} MiB`;
-}
-
-function MemoryPlanStrip({
-  plan,
-  pot,
-  stack,
-}: {
-  plan: MemoryPlanPayload;
-  pot: number;
-  stack: number;
-}) {
-  return (
-    <div
-      className="memory-plan"
-      data-over-budget={plan.fits_budget ? undefined : "true"}
-    >
-      <span>
-        Plan peak {formatPlanBytes(plan.estimated_peak_bytes)}
-        {plan.fits_budget ? "" : " (over budget)"}
-      </span>
-      <span>
-        Budget {formatPlanBytes(plan.memory_budget_bytes)} ·{" "}
-        {plan.public_decisions} decisions · {plan.deals} deals
-      </span>
-      <span className="tree-meta">
-        pot {pot} · stack {stack}
-      </span>
-    </div>
-  );
-}
-
 export function BuildWorkspace() {
   const draft = useStudyStore((s) => s.draft);
   const updateDraft = useStudyStore((s) => s.updateDraft);
@@ -254,12 +172,9 @@ export function BuildWorkspace() {
   const solutionId = useStudyStore((s) => s.solutionId);
   const workspace = useStudyStore((s) => s.workspace);
   const currentNode = useStudyStore((s) => s.currentNode);
-  const weights = useStudyStore((s) => s.weights);
-  const solve = useStudyStore((s) => s.solve);
   const potProvenance = provenanceHint(setupMeta, "pot");
   const stackProvenance = provenanceHint(setupMeta, "stack");
-  const [plan, setPlan] = useState<MemoryPlanPayload | null>(null);
-
+  // Live draft validation + engine phase — never stale setupMeta.canSolve.
   const solveGate = canExecuteSolve(
     studyCommandContextFromStore({
       phase,
@@ -283,19 +198,17 @@ export function BuildWorkspace() {
   const [treeCatalogueMode, setTreeCatalogueMode] = useState<
     "save" | "open" | null
   >(null);
-  const paintPct = Math.round(paintWeight * 100);
-  const [paintWeightDraft, setPaintWeightDraft] = useState(String(paintPct));
+  const [paintWeightDraft, setPaintWeightDraft] = useState(
+    paintWeight.toFixed(2),
+  );
   const [jobMessage, setJobMessage] = useState<string | null>(null);
   const jobFileInputRef = useRef<HTMLInputElement>(null);
   const applyPortableJobJson = useStudyStore((s) => s.applyPortableJobJson);
   const exportPortableJobJson = useStudyStore((s) => s.exportPortableJobJson);
 
   useEffect(() => {
-    setPaintWeightDraft(String(Math.round(paintWeight * 100)));
+    setPaintWeightDraft(paintWeight.toFixed(2));
   }, [paintWeight]);
-
-  const oopCombos = comboCount(weights.oop, draft.boardText);
-  const ipCombos = comboCount(weights.ip, draft.boardText);
 
   const exportStudyJob = () => {
     try {
@@ -307,7 +220,7 @@ export function BuildWorkspace() {
       a.download = "study-job.json";
       a.click();
       URL.revokeObjectURL(url);
-      setJobMessage("Exported study-job.json.");
+      setJobMessage("Exported study-job.json (same config as holdem-study-cli).");
     } catch (err) {
       setJobMessage(err instanceof Error ? err.message : String(err));
     }
@@ -333,12 +246,12 @@ export function BuildWorkspace() {
   const commitPaintWeightDraft = (raw: string) => {
     const parsed = Number(raw);
     if (!Number.isFinite(parsed)) {
-      setPaintWeightDraft(String(Math.round(paintWeight * 100)));
+      setPaintWeightDraft(paintWeight.toFixed(2));
       return;
     }
-    const clampedPct = Math.max(0, Math.min(100, parsed));
-    setPaintWeight(clampedPct / 100);
-    setPaintWeightDraft(String(Math.round(clampedPct)));
+    const clamped = Math.max(0, Math.min(1, parsed));
+    setPaintWeight(clamped);
+    setPaintWeightDraft(clamped.toFixed(2));
   };
 
   const showTextFor = (player: "oop" | "ip") =>
@@ -351,17 +264,6 @@ export function BuildWorkspace() {
     }
   };
 
-  const runSolve = () => {
-    void executeSolve({
-      getContext: () =>
-        studyCommandContextFromStore({
-          ...useStudyStore.getState(),
-          status: useStudyStore.getState().status,
-        }),
-      solve,
-    });
-  };
-
   return (
     <div className="build-workspace">
       <header className="build-header">
@@ -369,26 +271,15 @@ export function BuildWorkspace() {
           <h1>Build</h1>
           {setupMeta?.profile ? (
             <p className="build-profile-note">
-              Profile {setupMeta.profile.displayName} (
-              {setupMeta.profile.classification})
+              Profile {setupMeta.profile.displayName} ({setupMeta.profile.classification})
             </p>
           ) : null}
         </div>
-        <div className="build-solve-bar">
-          {plan ? (
-            <MemoryPlanStrip plan={plan} pot={draft.pot} stack={draft.stack} />
-          ) : (
-            <span className="build-solve-bar__pending muted">Memory…</span>
-          )}
-          <button
-            type="button"
-            className="toolbar-btn primary"
-            disabled={solveBlocked}
-            title={solveGate.ok ? undefined : solveGate.reason}
-            onClick={runSolve}
-          >
-            Solve
-          </button>
+        <div className="build-summary">
+          <span>{draft.boardText || "no board"}</span>
+          <span>
+            pot {draft.pot} · stack {draft.stack}
+          </span>
           <button
             type="button"
             className="toolbar-btn"
@@ -444,6 +335,7 @@ export function BuildWorkspace() {
 
       {solveBlocked && solveErrors.length > 0 ? (
         <div className="build-solve-errors" role="alert">
+          <p>Solve is blocked until the Build draft is valid:</p>
           <ul>
             {solveErrors.map((line) => (
               <li key={line}>{line}</li>
@@ -532,8 +424,8 @@ export function BuildWorkspace() {
         </div>
       ) : null}
 
-      <section className="build-section build-spot" aria-label="Spot">
-        <div className="build-inline build-inline--scalar">
+      <div className="build-grid">
+        <section className="build-section" data-span="2">
           <label>
             Board
             <input
@@ -541,157 +433,35 @@ export function BuildWorkspace() {
               onChange={(event) => updateDraft({ boardText: event.target.value })}
             />
           </label>
-          <label>
-            Pot{potProvenance ? ` · ${potProvenance}` : ""}
-            <input
-              type="number"
-              value={draft.pot}
-              onChange={(event) => updateDraft({ pot: Number(event.target.value) })}
-            />
-          </label>
-          <label>
-            Effective stack{stackProvenance ? ` · ${stackProvenance}` : ""}
-            <input
-              type="number"
-              value={draft.stack}
-              onChange={(event) => updateDraft({ stack: Number(event.target.value) })}
-            />
-          </label>
-        </div>
-        <div className="build-range-summaries" aria-label="Range summaries">
-          <div className="build-range-summary">
-            <h3 className="build-range-summary__seat">OOP range</h3>
-            <span className="build-range-summary__count tabular">
-              {formatComboCount(oopCombos)}
-            </span>
-            <span className="build-range-summary__text" title={draft.oopRange}>
-              {draft.oopRange || "—"}
-            </span>
+          <div className="build-inline build-inline--scalar">
+            <label>
+              Pot{potProvenance ? ` · ${potProvenance}` : ""}
+              <input
+                type="number"
+                value={draft.pot}
+                onChange={(event) => updateDraft({ pot: Number(event.target.value) })}
+              />
+            </label>
+            <label>
+              Stack{stackProvenance ? ` · ${stackProvenance}` : ""}
+              <input
+                type="number"
+                value={draft.stack}
+                onChange={(event) => updateDraft({ stack: Number(event.target.value) })}
+              />
+            </label>
+            <label>
+              Max raises
+              <input
+                type="number"
+                value={draft.maxRaises}
+                onChange={(event) => updateDraft({ maxRaises: Number(event.target.value) })}
+              />
+            </label>
           </div>
-          <div className="build-range-summary">
-            <h3 className="build-range-summary__seat">IP range</h3>
-            <span className="build-range-summary__count tabular">
-              {formatComboCount(ipCombos)}
-            </span>
-            <span className="build-range-summary__text" title={draft.ipRange}>
-              {draft.ipRange || "—"}
-            </span>
-          </div>
-        </div>
-      </section>
 
-      <div className="build-main">
-        <section className="build-section build-ranges" aria-labelledby="build-ranges-title">
           <div className="build-subhead-row">
-            <h2 id="build-ranges-title">Ranges</h2>
-            <div className="range-toolbar">
-              <label className="paint-weight-field">
-                Paint weight
-                <div className="paint-weight-controls">
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={5}
-                    value={paintPct}
-                    aria-label="Paint weight slider"
-                    onChange={(event) =>
-                      setPaintWeight(Number(event.target.value) / 100)
-                    }
-                  />
-                  <input
-                    type="number"
-                    className="paint-weight-input tabular"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={paintWeightDraft}
-                    aria-label="Paint weight value"
-                    onChange={(event) => setPaintWeightDraft(event.target.value)}
-                    onBlur={(event) => commitPaintWeightDraft(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.currentTarget.blur();
-                      }
-                    }}
-                  />
-                  <span className="paint-weight-unit" aria-hidden="true">
-                    %
-                  </span>
-                </div>
-              </label>
-              <button
-                type="button"
-                className="toolbar-btn"
-                disabled={!canUndoRange}
-                onClick={undoRange}
-              >
-                Undo
-              </button>
-              <button
-                type="button"
-                className="toolbar-btn"
-                disabled={!canRedoRange}
-                onClick={redoRange}
-              >
-                Redo
-              </button>
-              <button
-                type="button"
-                className="toolbar-btn"
-                title="Swap OOP and IP range values"
-                onClick={swapRanges}
-              >
-                Swap
-              </button>
-            </div>
-          </div>
-          <div className="range-pair">
-            {(["oop", "ip"] as const).map((player) => (
-              <div key={player} className="range-editor">
-                <div className="range-editor__head">
-                  <h3>{player.toUpperCase()}</h3>
-                  <button
-                    type="button"
-                    className="toolbar-btn"
-                    onClick={() => setCatalogueOpen(player)}
-                  >
-                    Catalogue
-                  </button>
-                  <button
-                    type="button"
-                    className="toolbar-btn"
-                    onClick={() => setShowTextFor(player, !showTextFor(player))}
-                  >
-                    {showTextFor(player) ? "Hide range text" : "Show range text"}
-                  </button>
-                  <button
-                    type="button"
-                    className="toolbar-btn"
-                    onClick={() => clearRange(player)}
-                  >
-                    Clear
-                  </button>
-                </div>
-                {showTextFor(player) ? (
-                  <textarea
-                    rows={3}
-                    value={player === "oop" ? draft.oopRange : draft.ipRange}
-                    onChange={(event) => setRangeText(player, event.target.value)}
-                  />
-                ) : null}
-                <RangePaintGrid player={player} />
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section
-          className="build-section build-betting-tree"
-          aria-labelledby="build-tree-title"
-        >
-          <div className="build-subhead-row">
-            <h2 id="build-tree-title">Betting tree</h2>
+            <h3 className="build-subhead">Betting tree</h3>
             <div className="build-subhead-actions">
               <button
                 type="button"
@@ -709,101 +479,117 @@ export function BuildWorkspace() {
               </button>
             </div>
           </div>
-
-          <div className="build-tree-grid" role="table" aria-label="Street sizes">
-            <div className="build-tree-grid__head" role="row">
-              <span role="columnheader" />
-              <span role="columnheader">OOP</span>
-              <span role="columnheader">IP</span>
-            </div>
-            {(
-              [
-                ["Flop bets", "Flop OOP bets", "Flop IP bets", "oopFlop", "ipFlop"],
-                [
-                  "Flop raises",
-                  "Flop OOP raises",
-                  "Flop IP raises",
-                  "oopFlopRaises",
-                  "ipFlopRaises",
-                ],
-                ["Turn bets", "Turn OOP bets", "Turn IP bets", "oopTurn", "ipTurn"],
-                [
-                  "Turn raises",
-                  "Turn OOP raises",
-                  "Turn IP raises",
-                  "oopTurnRaises",
-                  "ipTurnRaises",
-                ],
-                [
-                  "River bets",
-                  "River OOP bets",
-                  "River IP bets",
-                  "oopRiver",
-                  "ipRiver",
-                ],
-                [
-                  "River raises",
-                  "River OOP raises",
-                  "River IP raises",
-                  "oopRiverRaises",
-                  "ipRiverRaises",
-                ],
-              ] as const
-            ).map(([rowLabel, oopLabel, ipLabel, oopKey, ipKey]) => (
-              <div key={rowLabel} className="build-tree-grid__row" role="row">
-                <span className="build-tree-grid__row-label" role="rowheader">
-                  {rowLabel}
-                </span>
-                <SizeField
-                  label={oopLabel}
-                  hideCaption
-                  value={draft[oopKey]}
-                  onChange={(next) => updateDraft({ [oopKey]: next })}
-                />
-                <SizeField
-                  label={ipLabel}
-                  hideCaption
-                  value={draft[ipKey]}
-                  onChange={(next) => updateDraft({ [ipKey]: next })}
-                />
-              </div>
-            ))}
-          </div>
-
-          <h3 className="build-subhead">Donk</h3>
           <div className="build-inline">
-            <SizeField
-              label="Turn donk"
-              value={draft.oopTurnDonk}
-              onChange={(next) => updateDraft({ oopTurnDonk: next })}
-            />
-            <SizeField
-              label="River donk"
-              value={draft.oopRiverDonk}
-              onChange={(next) => updateDraft({ oopRiverDonk: next })}
-            />
-          </div>
-
-          <h3 className="build-subhead">Thresholds</h3>
-          <div className="build-inline build-inline--scalar">
             <label>
-              Max raises
+              Flop OOP bets
               <input
-                type="number"
-                value={draft.maxRaises}
-                onChange={(event) =>
-                  updateDraft({ maxRaises: Number(event.target.value) })
-                }
+                value={draft.oopFlop}
+                onChange={(event) => updateDraft({ oopFlop: event.target.value })}
               />
             </label>
+            <label>
+              Flop IP bets
+              <input
+                value={draft.ipFlop}
+                onChange={(event) => updateDraft({ ipFlop: event.target.value })}
+              />
+            </label>
+            <label>
+              Flop OOP raises
+              <input
+                value={draft.oopFlopRaises}
+                onChange={(event) => updateDraft({ oopFlopRaises: event.target.value })}
+              />
+            </label>
+            <label>
+              Flop IP raises
+              <input
+                value={draft.ipFlopRaises}
+                onChange={(event) => updateDraft({ ipFlopRaises: event.target.value })}
+              />
+            </label>
+          </div>
+          <div className="build-inline">
+            <label>
+              Turn OOP bets
+              <input
+                value={draft.oopTurn}
+                onChange={(event) => updateDraft({ oopTurn: event.target.value })}
+              />
+            </label>
+            <label>
+              Turn IP bets
+              <input
+                value={draft.ipTurn}
+                onChange={(event) => updateDraft({ ipTurn: event.target.value })}
+              />
+            </label>
+            <label>
+              Turn OOP raises
+              <input
+                value={draft.oopTurnRaises}
+                onChange={(event) => updateDraft({ oopTurnRaises: event.target.value })}
+              />
+            </label>
+            <label>
+              Turn IP raises
+              <input
+                value={draft.ipTurnRaises}
+                onChange={(event) => updateDraft({ ipTurnRaises: event.target.value })}
+              />
+            </label>
+            <label>
+              Turn donk
+              <input
+                value={draft.oopTurnDonk}
+                onChange={(event) => updateDraft({ oopTurnDonk: event.target.value })}
+              />
+            </label>
+          </div>
+          <div className="build-inline">
+            <label>
+              River OOP bets
+              <input
+                value={draft.oopRiver}
+                onChange={(event) => updateDraft({ oopRiver: event.target.value })}
+              />
+            </label>
+            <label>
+              River IP bets
+              <input
+                value={draft.ipRiver}
+                onChange={(event) => updateDraft({ ipRiver: event.target.value })}
+              />
+            </label>
+            <label>
+              River OOP raises
+              <input
+                value={draft.oopRiverRaises}
+                onChange={(event) => updateDraft({ oopRiverRaises: event.target.value })}
+              />
+            </label>
+            <label>
+              River IP raises
+              <input
+                value={draft.ipRiverRaises}
+                onChange={(event) => updateDraft({ ipRiverRaises: event.target.value })}
+              />
+            </label>
+            <label>
+              River donk
+              <input
+                value={draft.oopRiverDonk}
+                onChange={(event) => updateDraft({ oopRiverDonk: event.target.value })}
+              />
+            </label>
+          </div>
+          <div className="build-inline build-inline--scalar">
             <label>
               Pot cap
               <input
                 type="number"
                 value={draft.potCap}
-                onChange={(event) =>
-                  updateDraft({ potCap: Number(event.target.value) })
-                }
+                onChange={(event) => updateDraft({ potCap: Number(event.target.value) })}
               />
             </label>
             <label>
@@ -834,16 +620,14 @@ export function BuildWorkspace() {
             </label>
           </div>
 
-          <h3 className="build-subhead">Stopping</h3>
+          <h3 className="build-subhead">Stop</h3>
           <div className="build-inline build-inline--scalar">
             <label>
               Iterations
               <input
                 type="number"
                 value={draft.iterations}
-                onChange={(event) =>
-                  updateDraft({ iterations: Number(event.target.value) })
-                }
+                onChange={(event) => updateDraft({ iterations: Number(event.target.value) })}
               />
             </label>
             <label>
@@ -865,9 +649,97 @@ export function BuildWorkspace() {
             </label>
           </div>
         </section>
-      </div>
 
-      <TreeLineEditor hideMemoryStrip onPlanChange={setPlan} />
+        <TreeLineEditor />
+
+        <section className="build-section" data-span="2">
+          <h2>Ranges</h2>
+          <div className="range-toolbar">
+            <label className="paint-weight-field">
+              Paint weight
+              <div className="paint-weight-controls">
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={paintWeight}
+                  aria-label="Paint weight slider"
+                  onChange={(event) => setPaintWeight(Number(event.target.value))}
+                />
+                <input
+                  type="number"
+                  className="paint-weight-input tabular"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={paintWeightDraft}
+                  aria-label="Paint weight value"
+                  onChange={(event) => setPaintWeightDraft(event.target.value)}
+                  onBlur={(event) => commitPaintWeightDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.currentTarget.blur();
+                    }
+                  }}
+                />
+              </div>
+            </label>
+            <button type="button" className="toolbar-btn" disabled={!canUndoRange} onClick={undoRange}>
+              Undo
+            </button>
+            <button type="button" className="toolbar-btn" disabled={!canRedoRange} onClick={redoRange}>
+              Redo
+            </button>
+            <button
+              type="button"
+              className="toolbar-btn"
+              title="Swap OOP and IP range values"
+              onClick={swapRanges}
+            >
+              Swap
+            </button>
+          </div>
+          <div className="range-pair">
+          {(["oop", "ip"] as const).map((player) => (
+            <div key={player} className="range-editor">
+              <div className="range-editor__head">
+                <h3>{player.toUpperCase()}</h3>
+                <button
+                  type="button"
+                  className="toolbar-btn"
+                  onClick={() => setCatalogueOpen(player)}
+                >
+                  Catalogue
+                </button>
+                <button
+                  type="button"
+                  className="toolbar-btn"
+                  onClick={() => setShowTextFor(player, !showTextFor(player))}
+                >
+                  {showTextFor(player) ? "Hide range text" : "Show range text"}
+                </button>
+                <button
+                  type="button"
+                  className="toolbar-btn"
+                  onClick={() => clearRange(player)}
+                >
+                  Clear
+                </button>
+              </div>
+              {showTextFor(player) ? (
+                <textarea
+                  rows={3}
+                  value={player === "oop" ? draft.oopRange : draft.ipRange}
+                  onChange={(event) => setRangeText(player, event.target.value)}
+                />
+              ) : null}
+              <RangePaintGrid player={player} />
+            </div>
+          ))}
+          </div>
+        </section>
+      </div>
     </div>
   );
 }

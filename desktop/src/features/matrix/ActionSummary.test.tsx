@@ -72,8 +72,6 @@ describe("ActionSummary", () => {
 
   it("labels a 50% pot bet as b50 with separate frequency text", () => {
     render(<ActionSummary />);
-    expect(screen.getByText("Size")).toBeTruthy();
-    expect(screen.getByText("Range freq")).toBeTruthy();
     const filters = screen.getAllByRole("button", { name: /Filter/i });
     const b50 = filters.find((btn) => btn.getAttribute("aria-label")?.includes("b50"));
     expect(b50).toBeTruthy();
@@ -143,10 +141,10 @@ describe("ActionSummary", () => {
     const mix = screen.getByLabelText("Action frequency mix");
     const segs = [...mix.querySelectorAll(".action-summary__mix-seg")] as HTMLElement[];
     expect(segs.length).toBe(3);
-    // Check, Bet 50 (50%→palette 2), Bet 100 (100%→palette 4) — pot-normalized.
+    // Check, Bet 50, Bet 100 — same left-to-right order as the main matrix.
     expect(segs[0]?.style.background).toMatch(/63,\s*143,\s*107|#3F8F6B/i);
-    expect(segs[1]?.style.background).toMatch(/179,\s*58,\s*50|#B33A32/i);
-    expect(segs[2]?.style.background).toMatch(/107,\s*20,\s*32|#6B1420/i);
+    expect(segs[1]?.style.background).toMatch(/201,\s*132,\s*63|#C9843F/i);
+    expect(segs[2]?.style.background).toMatch(/196,\s*92,\s*58|#C45C3A/i);
   });
 
   it("reacts immediately when Settings betSizeDisplay changes", () => {

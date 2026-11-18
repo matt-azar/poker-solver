@@ -192,73 +192,10 @@
   font-size: 11px;
 }
 
-.action-summary__cols {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  padding: 0 2px;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-}
-
-.action-summary__col-freq {
-  text-align: right;
-  min-width: 4.5rem;
-}
-
 .action-summary__blocks {
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-
-/* Active filter chip beside the matrix (one-click clear). */
-.matrix-filter-chip {
-  --action-color: var(--accent);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid var(--action-color);
-  background: color-mix(in srgb, var(--action-color) 12%, var(--panel));
-  border-radius: var(--radius-sm);
-  padding: 2px 6px 2px 8px;
-  font-size: 12px;
-  max-width: 100%;
-}
-
-.matrix-filter-chip__swatch {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  flex-shrink: 0;
-  background: var(--action-color);
-}
-
-.matrix-filter-chip__label {
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.matrix-filter-chip__unit {
-  font-weight: 500;
-}
-
-.matrix-filter-chip__clear {
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: 11px;
-  font-weight: 650;
-  padding: 1px 4px;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-}
-
-.matrix-filter-chip__clear:hover {
-  background: color-mix(in srgb, var(--action-color) 18%, transparent);
 }
 
 /* Taller blocks when Actions sit in the detail rail. */
@@ -351,10 +288,10 @@
   background: var(--secondary);
   border-radius: var(--radius-sm);
   padding: 2px 8px;
-  color: var(--text);
+  color: var(--muted);
   font-size: 12px;
-  font-family: var(--font-sans);
-  letter-spacing: 0.01em;
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
   cursor: pointer;
 }
 
