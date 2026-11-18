@@ -8,7 +8,6 @@ import {
   type RefObject,
 } from "react";
 import { actionSizePotBasis } from "../../domain/actionHistory";
-import { useMatrixKeyboard, type MatrixFocusCell } from "./useMatrixKeyboard";
 import { mapActionColors } from "../../domain/actionColors";
 import {
   type AggregatedHandCell,
@@ -209,13 +208,6 @@ export function RangeMatrix() {
       ? matrixWidth
       : null;
   const stageRef = useRef<HTMLDivElement>(null);
-  const [focusCell, setFocusCell] = useState<MatrixFocusCell | null>(null);
-  const { onGridKeyDown } = useMatrixKeyboard({
-    selectedCell,
-    setSelectedCell,
-    focusCell,
-    setFocusCell,
-  });
   // Phone public demo: keep the 13×13 square and full-width.
   const aspectRatio = phoneDemo
     ? 1
@@ -326,8 +318,6 @@ export function RangeMatrix() {
           className="range-matrix matrix-density range-matrix--no-axis"
           role="grid"
           aria-label={matrixAria}
-          tabIndex={0}
-          data-keyboard-nav="true"
           style={
             userWidth
               ? { width: "100%", height: "100%" }
@@ -336,14 +326,6 @@ export function RangeMatrix() {
                 : undefined
           }
           onMouseLeave={() => setHoverCell(null)}
-          onKeyDown={onGridKeyDown}
-          onFocus={() => {
-            if (!focusCell && selectedCell) {
-              setFocusCell(selectedCell);
-            } else if (!focusCell) {
-              setFocusCell({ row: 0, col: 0, text: `${RANKS[0]}${RANKS[0]}` });
-            }
-          }}
         >
           {RANKS.map((rowRank, row) => (
             <MatrixRow
@@ -354,7 +336,6 @@ export function RangeMatrix() {
               matrixMode={matrixMode}
               selectedCell={selectedCell}
               hoverCell={hoverCell}
-              focusCell={focusCell}
               actionFilter={actionFilter}
               valueBluffsHighlight={valueBluffsHighlight}
               currentNode={currentNode}
@@ -365,7 +346,6 @@ export function RangeMatrix() {
               displayPrefs={displayPrefs}
               setSelectedCell={setSelectedCell}
               setHoverCell={setHoverCell}
-              setFocusCell={setFocusCell}
             />
           ))}
         </div>
@@ -403,7 +383,6 @@ interface RowProps {
   matrixMode: MatrixMode;
   selectedCell: Selected | null;
   hoverCell: Selected | null;
-  focusCell: MatrixFocusCell | null;
   actionFilter: number | null;
   /** When non-null, dim matrix cells whose label is not in the set. */
   valueBluffsHighlight: ReadonlySet<string> | null;
@@ -415,7 +394,6 @@ interface RowProps {
   displayPrefs: DisplayPrefs;
   setSelectedCell: (cell: Selected | null) => void;
   setHoverCell: (cell: Selected | null) => void;
-  setFocusCell: (cell: MatrixFocusCell | null) => void;
 }
 
 function MatrixRow({
@@ -425,7 +403,6 @@ function MatrixRow({
   matrixMode,
   selectedCell,
   hoverCell,
-  focusCell,
   actionFilter,
   valueBluffsHighlight,
   currentNode,
@@ -436,7 +413,6 @@ function MatrixRow({
   displayPrefs,
   setSelectedCell,
   setHoverCell,
-  setFocusCell,
 }: RowProps) {
   return (
     <>
@@ -457,7 +433,6 @@ function MatrixRow({
         const empty = excluded;
         const selected = selectedCell?.row === row && selectedCell?.col === col;
         const hovered = hoverCell?.row === row && hoverCell?.col === col;
-        const focused = focusCell?.row === row && focusCell?.col === col;
 
         // Paint outputs. `segments` = shared strategy bars (passive → left).
         // `solid` = a single background (range weight, EV, or equity).
@@ -621,12 +596,10 @@ function MatrixRow({
             type="button"
             className="matrix-cell"
             role="gridcell"
-            tabIndex={-1}
             data-empty={empty}
             data-excluded={excluded}
             data-selected={selected}
             data-hover={hovered}
-            data-focus={focused}
             data-dimmed={dimmed}
             data-filtered={filtered}
             data-partial-inclusion={partialInclusion}
@@ -647,11 +620,7 @@ function MatrixRow({
                   : undefined
             }
             onMouseEnter={() => setHoverCell({ row, col, text })}
-            onClick={() => {
-              const cell = { row, col, text };
-              setFocusCell(cell);
-              setSelectedCell(cell);
-            }}
+            onClick={() => setSelectedCell({ row, col, text })}
             title={title}
           >
             {/* Height fill: bars or the solid tint sit in a bottom-anchored box

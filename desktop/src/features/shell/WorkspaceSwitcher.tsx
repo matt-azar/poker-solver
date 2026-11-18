@@ -26,50 +26,10 @@ function workspaceUnavailableReason(id: WorkspaceId): string | null {
   return null;
 }
 
-function nextAvailable(
-  from: WorkspaceId,
-  delta: number,
-): WorkspaceId | null {
-  const index = WORKSPACES.findIndex((entry) => entry.id === from);
-  if (index < 0) {
-    return null;
-  }
-  for (let step = 1; step <= WORKSPACES.length; step += 1) {
-    const next =
-      WORKSPACES[(index + delta * step + WORKSPACES.length * 8) % WORKSPACES.length];
-    if (!workspaceUnavailableReason(next.id)) {
-      return next.id;
-    }
-  }
-  return null;
-}
-
 export function WorkspaceSwitcher({ workspace, onChange }: Props) {
   return (
     <div className="workspace-switcher" aria-label="Workspace">
-      <div
-        className="workspace-switcher__tabs"
-        role="tablist"
-        aria-label="Workspace"
-        onKeyDown={(event) => {
-          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
-            return;
-          }
-          event.preventDefault();
-          const next = nextAvailable(
-            workspace,
-            event.key === "ArrowRight" ? 1 : -1,
-          );
-          if (!next) {
-            return;
-          }
-          onChange(next);
-          const tab = event.currentTarget.querySelector<HTMLElement>(
-            `[role="tab"][data-workspace="${next}"]`,
-          );
-          tab?.focus();
-        }}
-      >
+      <div className="workspace-switcher__tabs" role="tablist" aria-label="Workspace">
         {WORKSPACES.map((entry) => {
           const selected = workspace === entry.id;
           const unavailable = workspaceUnavailableReason(entry.id);
@@ -78,7 +38,6 @@ export function WorkspaceSwitcher({ workspace, onChange }: Props) {
               key={entry.id}
               type="button"
               role="tab"
-              data-workspace={entry.id}
               className="workspace-switcher__tab"
               aria-selected={selected}
               aria-disabled={unavailable ? true : undefined}

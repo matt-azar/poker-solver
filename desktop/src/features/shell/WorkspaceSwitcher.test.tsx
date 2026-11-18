@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clearStudyIpcFeatureOverridesForTests,
@@ -62,13 +62,5 @@ describe("WorkspaceSwitcher", () => {
     expect(compareTab.getAttribute("title")).toMatch(/not available/i);
     compareTab.click();
     expect(onChange).not.toHaveBeenCalled();
-  });
-
-  it("moves between workspace tabs with arrow keys", () => {
-    const onChange = vi.fn();
-    render(<WorkspaceSwitcher workspace="study" onChange={onChange} />);
-    const tablist = screen.getByRole("tablist", { name: "Workspace" });
-    fireEvent.keyDown(tablist, { key: "ArrowRight" });
-    expect(onChange).toHaveBeenCalledWith("build");
   });
 });
