@@ -15,13 +15,17 @@ pub const IcmConfig = struct {
     pub fn validate(self: IcmConfig, pot: chips.Chip, effective_stack: chips.Chip) IcmError!void {
         if (!self.enabled()) return;
         if (self.stacks.len < 2) return error.InvalidIcm;
-        try validateInputs(self.stacks, self.payouts);
+        // Solve configs must list only the remaining field (all stacks > 0) with
+        // prizes for that field. Already-out seats must not appear as zeros —
+        // seat-order bust assignment would steal their finishing place.
+        try validateStartingStacks(self.stacks, self.payouts);
         if (pot < 0 or effective_stack < 0) return error.InvalidIcm;
         const need = 0.5 * chips.tenthsToChips(pot) + chips.tenthsToChips(effective_stack);
         if (self.stacks[0] < need or self.stacks[1] < need) return error.InvalidIcm;
     }
 };
 
+/// Nonnegative stacks/payouts for equity evaluation (post-hand zeros allowed).
 pub fn validateInputs(stacks: []const f64, payouts: []const f64) IcmError!void {
     if (stacks.len == 0) return error.InvalidIcm;
     var total: f64 = 0;
@@ -32,6 +36,14 @@ pub fn validateInputs(stacks: []const f64, payouts: []const f64) IcmError!void {
     if (!(total > 0.0)) return error.InvalidIcm;
     for (payouts) |prize| {
         if (!(prize >= 0.0) or !std.math.isFinite(prize)) return error.InvalidIcm;
+    }
+}
+
+/// Starting ICM for a solve: every seat still in must have a positive stack.
+pub fn validateStartingStacks(stacks: []const f64, payouts: []const f64) IcmError!void {
+    try validateInputs(stacks, payouts);
+    for (stacks) |s| {
+        if (!(s > 0.0)) return error.InvalidIcm;
     }
 }
 
@@ -77,9 +89,11 @@ fn icmRecurse(
 /// tables fall back to the allocator path in `icmEquities` / `applyIcmTerminal`.
 pub const max_stack_seats: usize = 16;
 
-/// Already-zero seats have finished from the bottom of the field and take those
-/// places immediately (bust on this hand → last remaining prize). Contested
-/// places among positive stacks are `payouts[0..contested_end)`.
+/// Zero seats in a post-hand stack vector busted on this hand and take places
+/// from the bottom (last remaining prize). Starting solve configs must not
+/// include already-out zeros — use `validateStartingStacks` / remaining-field
+/// payouts instead. Contested places among positive stacks are
+/// `payouts[0..contested_end)`.
 fn icmEquitiesInto(stacks: []const f64, payouts: []const f64, work: []f64, equities: []f64) IcmError!void {
     try validateInputs(stacks, payouts);
     const n = stacks.len;
@@ -129,7 +143,7 @@ fn applyIcmTerminalWithPre(
 ) IcmError!payoff.PlayerPayoff {
     if (!icm.enabled()) return chip_terminal;
     if (icm.stacks.len < 2 or pre_eq.len != icm.stacks.len) return error.InvalidIcm;
-    try validateInputs(icm.stacks, icm.payouts);
+    try validateStartingStacks(icm.stacks, icm.payouts);
     if (!std.math.isFinite(chip_terminal.utility[0]) or !std.math.isFinite(chip_terminal.utility[1])) {
         return error.InvalidIcm;
     }
@@ -194,7 +208,7 @@ pub fn applyIcmTerminal(
 ) IcmError!payoff.PlayerPayoff {
     if (!icm.enabled()) return chip_terminal;
     if (icm.stacks.len < 2) return error.InvalidIcm;
-    try validateInputs(icm.stacks, icm.payouts);
+    try validateStartingStacks(icm.stacks, icm.payouts);
     if (!std.math.isFinite(chip_terminal.utility[0]) or !std.math.isFinite(chip_terminal.utility[1])) {
         return error.InvalidIcm;
     }
@@ -232,7 +246,7 @@ pub const TerminalCache = struct {
     pub fn init(allocator: std.mem.Allocator, cfg: IcmConfig) IcmError!TerminalCache {
         if (!cfg.enabled()) return .{};
         if (cfg.stacks.len < 2) return error.InvalidIcm;
-        try validateInputs(cfg.stacks, cfg.payouts);
+        try validateStartingStacks(cfg.stacks, cfg.payouts);
         const pre = try icmEquities(allocator, cfg.stacks, cfg.payouts);
         errdefer allocator.free(pre);
         var map = std.AutoHashMap(u128, payoff.PlayerPayoff).init(allocator);

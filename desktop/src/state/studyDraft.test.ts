@@ -130,6 +130,32 @@ describe("buildJob Accuracy % field", () => {
   });
 });
 
+describe("buildJob ICM stacks", () => {
+  it("rejects already-out zero stacks", () => {
+    expect(() =>
+      buildJob({
+        ...DEFAULT_SPOT,
+        boardText: "Ah Kd 7c",
+        useIcm: true,
+        icmStacks: "150, 1500, 8350, 0",
+        icmPayouts: "50, 30, 15, 5",
+      }),
+    ).toThrow(/positive|remaining field/i);
+  });
+
+  it("accepts a positive remaining field", () => {
+    const job = buildJob({
+      ...DEFAULT_SPOT,
+      boardText: "Ah Kd 7c",
+      useIcm: true,
+      icmStacks: "150, 1500, 8350",
+      icmPayouts: "50, 30, 15",
+    });
+    expect(job.icm_stacks).toEqual([150, 1500, 8350]);
+    expect(job.icm_payouts).toEqual([50, 30, 15]);
+  });
+});
+
 describe("buildJob all-in", () => {
   it("defaults all_in_threshold to half stack and does not invent a", () => {
     const job = buildJob({

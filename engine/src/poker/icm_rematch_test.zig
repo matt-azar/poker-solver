@@ -2,6 +2,7 @@
 const std = @import("std");
 const icm = @import("icm.zig");
 const payoff = @import("payoff.zig");
+const chips = @import("chips.zig");
 
 test "icm equities HU WTA and second-place pins" {
     {
@@ -42,7 +43,8 @@ test "icm three-player Malmuth-Harville pin" {
 }
 
 test "icm zero-stack seat eliminated" {
-    // Only two paid places: busted seat finishes 3rd unpaid → 0.
+    // Post-hand equity only: busted seat finishes 3rd unpaid → 0.
+    // Solve configs must not start with zeros (see validateStartingStacks).
     const stacks = [_]f64{ 1000, 0, 1000 };
     const payouts = [_]f64{ 80, 20 };
     const eq = try icm.icmEquities(std.testing.allocator, &stacks, &payouts);
@@ -53,7 +55,7 @@ test "icm zero-stack seat eliminated" {
 }
 
 test "icm busted seat receives paid last place" {
-    // Three paid places: zero stack has already finished 3rd → payouts[2].
+    // Post-hand: seat 0 busted this hand → 3rd of remaining field → payouts[2].
     const stacks = [_]f64{ 0, 1650, 8350 };
     const payouts = [_]f64{ 50, 30, 20 };
     const eq = try icm.icmEquities(std.testing.allocator, &stacks, &payouts);
@@ -62,6 +64,45 @@ test "icm busted seat receives paid last place" {
     try std.testing.expectApproxEqAbs(@as(f64, 33.3), eq[1], 1e-9);
     try std.testing.expectApproxEqAbs(@as(f64, 46.7), eq[2], 1e-9);
     try std.testing.expectApproxEqAbs(@as(f64, 100.0), eq[0] + eq[1] + eq[2], 1e-9);
+}
+
+test "starting stacks reject already-out zeros; remaining field bust gets third" {
+    // Including an already-out 0 with full payout ladder steals 3rd for seat order.
+    {
+        const bad_stacks = [_]f64{ 150, 1500, 8350, 0 };
+        const bad_payouts = [_]f64{ 50, 30, 15, 5 };
+        const cfg = icm.IcmConfig{ .stacks = &bad_stacks, .payouts = &bad_payouts };
+        try std.testing.expectError(
+            error.InvalidIcm,
+            cfg.validate(chips.chipUnits(100), chips.chipUnits(100)),
+        );
+        try std.testing.expectError(
+            error.InvalidIcm,
+            icm.validateStartingStacks(&bad_stacks, &bad_payouts),
+        );
+        // Equity helper still runs (post-hand path) but assigns by seat order —
+        // busted 150 would wrongly get 5. That is why solve rejects starting zeros.
+        const post = [_]f64{ 0, 1650, 8350, 0 };
+        const wrong = try icm.icmEquities(std.testing.allocator, &post, &bad_payouts);
+        defer std.testing.allocator.free(wrong);
+        try std.testing.expectApproxEqAbs(@as(f64, 5.0), wrong[0], 1e-12);
+    }
+    // Remaining field only: prizes for seats still in. Bust → 3rd = 15.
+    {
+        const stacks = [_]f64{ 150, 1500, 8350 };
+        const payouts = [_]f64{ 50, 30, 15 };
+        const cfg = icm.IcmConfig{ .stacks = &stacks, .payouts = &payouts };
+        try cfg.validate(chips.chipUnits(100), chips.chipUnits(100));
+        const lose = payoff.PlayerPayoff{ .utility = .{ -150, 150 } };
+        const delta = try icm.applyIcmTerminal(std.testing.allocator, cfg, lose);
+        const pre = try icm.icmEquities(std.testing.allocator, &stacks, &payouts);
+        defer std.testing.allocator.free(pre);
+        try std.testing.expectApproxEqAbs(@as(f64, 15.0), pre[0] + delta.utility[0], 1e-12);
+        const post = [_]f64{ 0, 1650, 8350 };
+        const post_eq = try icm.icmEquities(std.testing.allocator, &post, &payouts);
+        defer std.testing.allocator.free(post_eq);
+        try std.testing.expectApproxEqAbs(@as(f64, 15.0), post_eq[0], 1e-12);
+    }
 }
 
 test "icm rejects bad inputs" {
@@ -85,6 +126,11 @@ test "icm rejects bad inputs" {
         const payouts = [_]f64{-1};
         try std.testing.expectError(error.InvalidIcm, icm.icmEquities(std.testing.allocator, &stacks, &payouts));
     }
+    {
+        const stacks = [_]f64{ 100, 0 };
+        const payouts = [_]f64{1};
+        try std.testing.expectError(error.InvalidIcm, icm.validateStartingStacks(&stacks, &payouts));
+    }
 }
 
 test "applyIcmTerminal chip→ICM delta pins" {
@@ -93,8 +139,8 @@ test "applyIcmTerminal chip→ICM delta pins" {
         const stacks = [_]f64{ 1000, 1000 };
         const payouts = [_]f64{ 100, 0 };
         const cfg = icm.IcmConfig{ .stacks = &stacks, .payouts = &payouts };
-        const chips = payoff.PlayerPayoff{ .utility = .{ 100, -100 } };
-        const delta = try icm.applyIcmTerminal(std.testing.allocator, cfg, chips);
+        const chip_pay = payoff.PlayerPayoff{ .utility = .{ 100, -100 } };
+        const delta = try icm.applyIcmTerminal(std.testing.allocator, cfg, chip_pay);
         try std.testing.expectApproxEqAbs(@as(f64, 5.0), delta.utility[0], 1e-12);
         try std.testing.expectApproxEqAbs(@as(f64, -5.0), delta.utility[1], 1e-12);
     }
@@ -103,19 +149,19 @@ test "applyIcmTerminal chip→ICM delta pins" {
         const stacks = [_]f64{ 1000, 1000 };
         const payouts = [_]f64{ 70, 30 };
         const cfg = icm.IcmConfig{ .stacks = &stacks, .payouts = &payouts };
-        const chips = payoff.PlayerPayoff{ .utility = .{ 100, -100 } };
-        const delta = try icm.applyIcmTerminal(std.testing.allocator, cfg, chips);
+        const chip_pay = payoff.PlayerPayoff{ .utility = .{ 100, -100 } };
+        const delta = try icm.applyIcmTerminal(std.testing.allocator, cfg, chip_pay);
         try std.testing.expectApproxEqAbs(@as(f64, 2.0), delta.utility[0], 1e-12);
         try std.testing.expectApproxEqAbs(@as(f64, -2.0), delta.utility[1], 1e-12);
     }
     // Real ChipPayoff fold (50,-50) + WTA → (+2.5,-2.5)
     {
-        const chips = try payoff.chipTerminal(1000, 1000, 0, 1, 0, .{});
-        try std.testing.expectApproxEqAbs(@as(f64, 50.0), chips.utility[0], 1e-12);
+        const chip_pay = try payoff.chipTerminal(1000, 1000, 0, 1, 0, .{});
+        try std.testing.expectApproxEqAbs(@as(f64, 50.0), chip_pay.utility[0], 1e-12);
         const stacks = [_]f64{ 1000, 1000 };
         const payouts = [_]f64{100};
         const cfg = icm.IcmConfig{ .stacks = &stacks, .payouts = &payouts };
-        const delta = try icm.applyIcmTerminal(std.testing.allocator, cfg, chips);
+        const delta = try icm.applyIcmTerminal(std.testing.allocator, cfg, chip_pay);
         try std.testing.expectApproxEqAbs(@as(f64, 2.5), delta.utility[0], 1e-12);
         try std.testing.expectApproxEqAbs(@as(f64, -2.5), delta.utility[1], 1e-12);
     }
@@ -124,7 +170,7 @@ test "applyIcmTerminal chip→ICM delta pins" {
         const stacks = [_]f64{ 40, 40 };
         const payouts = [_]f64{100};
         const cfg = icm.IcmConfig{ .stacks = &stacks, .payouts = &payouts };
-        const chips = payoff.PlayerPayoff{ .utility = .{ 50, -50 } };
-        try std.testing.expectError(error.InvalidIcm, icm.applyIcmTerminal(std.testing.allocator, cfg, chips));
+        const chip_pay = payoff.PlayerPayoff{ .utility = .{ 50, -50 } };
+        try std.testing.expectError(error.InvalidIcm, icm.applyIcmTerminal(std.testing.allocator, cfg, chip_pay));
     }
 }

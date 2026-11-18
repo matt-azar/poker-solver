@@ -286,6 +286,11 @@ export function buildJob(draft: SpotDraft): SolveJobRequest {
   if (draft.useIcm && icmStacks.length < 2) {
     throw new Error("ICM stacks need at least two seats.");
   }
+  if (draft.useIcm && icmStacks.some((stack) => !(stack > 0))) {
+    throw new Error(
+      "ICM stacks must be positive; omit already-out players and enter prizes for the remaining field.",
+    );
+  }
 
   const body: SolveJobRequest = {
     board,
