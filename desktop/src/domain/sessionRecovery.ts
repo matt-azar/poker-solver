@@ -703,6 +703,28 @@ export function isSoftRpcTimeoutDetail(detail: string): boolean {
   );
 }
 
+/**
+ * Soft-recover a train RPC timeout only when the host shows live train activity.
+ * A pre-existing `solution_id` alone is not evidence the new command ran
+ * (IPC audit §4 / StudyStore wire-up).
+ */
+export function shouldSoftRecoverTrainTimeout(status: {
+  running?: boolean;
+  paused?: boolean;
+  solution_id?: string | null;
+}): boolean {
+  return Boolean(status.running || status.paused);
+}
+
+/**
+ * Ensure/Ready failed while the child may still be alive — never silent teardown.
+ * Caller should offer Restart Engine (forceRestart) with unsaved-work consequence.
+ */
+export function explicitRestartRecoveryMessage(detail: string): string {
+  const cleaned = detail.trim() || "connection unusable";
+  return `Engine connection unusable: ${cleaned}. The solver process may still be alive with unsaved work. Use Restart Engine to tear it down and spawn fresh — unsaved progress in that child may be lost.`;
+}
+
 /** True when store message is a disconnected / ensure-fail recovery string. */
 export function isRecoveryOrUnreachableMessage(message: string): boolean {
   const text = message.toLowerCase();
@@ -710,7 +732,9 @@ export function isRecoveryOrUnreachableMessage(message: string): boolean {
     text.includes("engine unreachable") ||
     text.includes("reconnecting") ||
     text.includes("engine setup failed") ||
-    text.includes("use reconnect")
+    text.includes("use reconnect") ||
+    text.includes("restart engine") ||
+    text.includes("connection unusable")
   );
 }
 
