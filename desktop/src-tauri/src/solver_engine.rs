@@ -44,7 +44,7 @@ use tokio::sync::oneshot;
 
 use crate::diagnostics;
 use crate::solver_admission::{
-    self, classify_op, is_mutating, AdmissionBoard, OpClass, MAX_OUTSTANDING,
+    self, classify_op, is_mutating, AdmissionBoard, OpClass, StatusRole, MAX_OUTSTANDING,
 };
 use crate::solver_ipc::{
     duration_ms, validate_reply, IpcDiagSample, IpcError, PendingWaiter, ReplyValidation,
@@ -95,6 +95,17 @@ pub struct SolverEngineInfo {
     pub http_fallback_label: String,
 }
 
+/// Launch-scoped mutation receipt for reconcile-before-retry (audit §4).
+#[derive(Debug, Clone)]
+enum MutationReceipt {
+    InFlight { request_id: String },
+    /// Write started or completed; outcome not yet known.
+    Unknown { request_id: String },
+    Done { reply: Value },
+}
+
+const MUTATION_LEDGER_CAP: usize = 64;
+
 /// Shared pipe IO: reply demux + bounded admission board (stdin owned by writer).
 struct SessionIo {
     board: Arc<AdmissionBoard>,
@@ -110,6 +121,8 @@ struct SessionIo {
     diag: SharedDiagRing,
     /// Last observed child exit status string (set on reap when known).
     child_exit: Mutex<Option<String>>,
+    /// Bounded mutation receipts keyed by operation_id / job_id.
+    mutations: Mutex<HashMap<String, MutationReceipt>>,
 }
 
 fn new_session_io(launch_id: &str, shut_down: Arc<AtomicBool>, board: Arc<AdmissionBoard>) -> Arc<SessionIo> {
@@ -122,7 +135,57 @@ fn new_session_io(launch_id: &str, shut_down: Arc<AtomicBool>, board: Arc<Admiss
         launch_id: launch_id.to_string(),
         diag: SharedDiagRing::default(),
         child_exit: Mutex::new(None),
+        mutations: Mutex::new(HashMap::new()),
     })
+}
+
+/// Prefer explicit `operation_id`, else `op:job_id` for train-class mutations.
+fn mutation_reconcile_key(op: &str, body: &Value, job_id: Option<&str>) -> Option<String> {
+    if !is_mutating(op) {
+        return None;
+    }
+    if let Some(id) = body
+        .get("operation_id")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return Some(format!("{op}:{id}"));
+    }
+    if let Some(jid) = job_id.map(str::trim).filter(|s| !s.is_empty()) {
+        return Some(format!("{op}:{jid}"));
+    }
+    None
+}
+
+fn record_diag(io: &SessionIo, sample: IpcDiagSample, origin: Option<&str>) {
+    let launch = diagnostics::LaunchIpcSample {
+        launch_id: sample.launch_id.clone(),
+        request_id: sample.request_id.clone(),
+        op: sample.op.clone(),
+        origin: origin.map(|s| s.to_string()),
+        queue_wait_ms: sample.queue_wait_ms,
+        write_duration_ms: sample.write_duration_ms,
+        reply_wait_ms: sample.reply_wait_ms,
+        child_exit: sample.child_exit.clone(),
+        outcome: sample.outcome.clone(),
+    };
+    io.diag.record(sample);
+    diagnostics::record_launch_ipc_sample(launch);
+}
+
+fn settle_status_followers(
+    waiters: Vec<oneshot::Sender<Result<Value, String>>>,
+    result: &Result<Value, IpcError>,
+) {
+    fanout_coalesce(waiters, result);
+}
+
+/// Ready/ensure against an existing child: tear down only on connection loss /
+/// observed process exit. Congestion and soft timeouts preserve the child
+/// (coordinates with TS `decideReadyProbeOnExistingChild`).
+fn ready_probe_should_teardown(err: &IpcError) -> bool {
+    err.is_connection_loss()
 }
 
 /// One supervised launch: kill handle is independent of the writer.
@@ -343,23 +406,27 @@ fn fail_connection_once(io: &SessionIo, err: IpcError) {
         } => IpcError::connection_loss(message, launch_id, child_exit),
         other => other,
     };
-    io.diag.record(IpcDiagSample {
-        launch_id: io.launch_id.clone(),
-        request_id: None,
-        op: None,
-        queue_wait_ms: None,
-        write_duration_ms: None,
-        reply_wait_ms: None,
-        child_exit: match &err {
-            IpcError::ConnectionLoss { child_exit, .. } => child_exit.clone(),
-            _ => None,
+    record_diag(
+        io,
+        IpcDiagSample {
+            launch_id: io.launch_id.clone(),
+            request_id: None,
+            op: None,
+            queue_wait_ms: None,
+            write_duration_ms: None,
+            reply_wait_ms: None,
+            child_exit: match &err {
+                IpcError::ConnectionLoss { child_exit, .. } => child_exit.clone(),
+                _ => None,
+            },
+            outcome: match &err {
+                IpcError::ConnectionLoss { .. } => "connection_loss".into(),
+                IpcError::ProtocolFailure { .. } => "protocol_failure".into(),
+                _ => "connection_closed".into(),
+            },
         },
-        outcome: match &err {
-            IpcError::ConnectionLoss { .. } => "connection_loss".into(),
-            IpcError::ProtocolFailure { .. } => "protocol_failure".into(),
-            _ => "connection_closed".into(),
-        },
-    });
+        Some("connection"),
+    );
     let mut pending = match io.pending.lock() {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
@@ -440,24 +507,81 @@ fn reader_loop(mut stdout: ChildStdout, io: Arc<SessionIo>) {
                     }
                     ReplyValidation::Ok => {
                         let coalesce = io.board.take_status_coalesce(&rid);
-                        let result = deliver_reply_value(reply);
+                        let host_ok = reply.get("ok").and_then(|v| v.as_bool());
+                        let outcome = diagnostics::outcome_for_host_reply(host_ok).to_string();
+                        let result = deliver_reply_value(reply.clone());
                         if let Some(waiter) = removed {
-                            if let Some(wrote_at) = waiter.wrote_at {
-                                io.diag.record(IpcDiagSample {
-                                    launch_id: io.launch_id.clone(),
-                                    request_id: Some(rid.clone()),
-                                    op: Some(waiter.op.clone()),
-                                    queue_wait_ms: None,
-                                    write_duration_ms: None,
-                                    reply_wait_ms: Some(duration_ms(wrote_at.elapsed())),
-                                    child_exit: None,
-                                    outcome: "ok".into(),
-                                });
+                            // Reconcile mutation ledger on authoritative reply.
+                            if is_mutating(&waiter.op) {
+                                if let Ok(mut ledger) = io.mutations.lock() {
+                                    // Match by request_id across keys.
+                                    let keys: Vec<String> = ledger
+                                        .iter()
+                                        .filter_map(|(k, v)| match v {
+                                            MutationReceipt::InFlight { request_id }
+                                            | MutationReceipt::Unknown { request_id }
+                                                if request_id == &rid =>
+                                            {
+                                                Some(k.clone())
+                                            }
+                                            _ => None,
+                                        })
+                                        .collect();
+                                    for k in keys {
+                                        ledger.insert(
+                                            k,
+                                            MutationReceipt::Done {
+                                                reply: reply.clone(),
+                                            },
+                                        );
+                                    }
+                                }
                             }
-                            fanout_coalesce(coalesce, &result);
+                            if let Some(wrote_at) = waiter.wrote_at {
+                                record_diag(
+                                    &io,
+                                    IpcDiagSample {
+                                        launch_id: io.launch_id.clone(),
+                                        request_id: Some(rid.clone()),
+                                        op: Some(waiter.op.clone()),
+                                        queue_wait_ms: None,
+                                        write_duration_ms: None,
+                                        reply_wait_ms: Some(duration_ms(wrote_at.elapsed())),
+                                        child_exit: None,
+                                        outcome,
+                                    },
+                                    None,
+                                );
+                            }
+                            settle_status_followers(coalesce, &result);
                             let _ = waiter.tx.send(result);
-                        } else if !coalesce.is_empty() {
-                            fanout_coalesce(coalesce, &result);
+                        } else {
+                            // Late / orphan reply after timeout — still reconcile mutations.
+                            if let Ok(mut ledger) = io.mutations.lock() {
+                                let keys: Vec<String> = ledger
+                                    .iter()
+                                    .filter_map(|(k, v)| match v {
+                                        MutationReceipt::InFlight { request_id }
+                                        | MutationReceipt::Unknown { request_id }
+                                            if request_id == &rid =>
+                                        {
+                                            Some(k.clone())
+                                        }
+                                        _ => None,
+                                    })
+                                    .collect();
+                                for k in keys {
+                                    ledger.insert(
+                                        k,
+                                        MutationReceipt::Done {
+                                            reply: reply.clone(),
+                                        },
+                                    );
+                                }
+                            }
+                            if !coalesce.is_empty() {
+                                settle_status_followers(coalesce, &result);
+                            }
                         }
                     }
                 }
@@ -494,6 +618,7 @@ fn reader_loop(mut stdout: ChildStdout, io: Arc<SessionIo>) {
             "solver-engine stdout EOF ({err}); sidecar exited before host kill"
         );
         diagnostics::append_engine_log(format!("{reason}\n").as_bytes());
+        diagnostics::note_last_launch_child_exit("stdout-eof");
         diagnostics::record_fault(
             &io.launch_id,
             Some("stdout-eof"),
@@ -590,6 +715,9 @@ fn kill_session(
             Ok(Some(status)) => Some(status.to_string()),
             _ => Some("killed".into()),
         };
+        if let Some(ref exit) = exit_str {
+            diagnostics::note_last_launch_child_exit(exit);
+        }
         if let Ok(mut slot) = session.io.child_exit.lock() {
             *slot = exit_str.clone();
         }
@@ -767,12 +895,12 @@ impl Drop for OutstandingGuard {
     }
 }
 
-/// Async RPC: admit → priority enqueue → await write → await demuxed reply.
+/// Async RPC: admit → priority enqueue → await write (deadline-bounded) → reply.
 ///
-/// Deadlines start at admission. Distinguishes expired-before-write (never
-/// reached the sidecar) from unknown-after-write (mutating ops must not
-/// auto-replay). Status polls coalesce onto one in-flight request per launch.
-/// Never uses per-invoke `spawn_blocking` for pipe I/O.
+/// Delivery states: Queued → Writing → Written. Expiring while queued cancels
+/// delivery (never sent). Once Writing, mutation outcome is unknown until
+/// reconciled by operation/job id. Status leader election is atomic; followers
+/// always receive a settled typed outcome (local drop ≠ process exit).
 async fn rpc_shared(
     io: &Arc<SessionIo>,
     op: &str,
@@ -798,39 +926,86 @@ async fn rpc_shared(
         ));
     }
 
+    // Reconcile ambiguous mutations by operation / job id before retry.
+    let reconcile_key = mutation_reconcile_key(op, &body, job_id.as_deref());
+    if let Some(ref key) = reconcile_key {
+        if let Ok(ledger) = io.mutations.lock() {
+            match ledger.get(key) {
+                Some(MutationReceipt::Done { reply }) => {
+                    return Ok(reply.clone());
+                }
+                Some(MutationReceipt::Unknown { request_id }) => {
+                    return Err(IpcError::timeout(
+                        TimeoutPhase::AfterWrite,
+                        format!(
+                            "unknown-after-write: op {op} prior mutation {key} \
+                             (request {request_id}) still unresolved — do not auto-replay"
+                        ),
+                        op,
+                        Some(request_id.clone()),
+                        false,
+                    ));
+                }
+                Some(MutationReceipt::InFlight { request_id }) => {
+                    return Err(IpcError::engine_rejection(
+                        "mutation_in_flight",
+                        format!("mutation {key} already in flight as {request_id}"),
+                        op,
+                        request_id.clone(),
+                    ));
+                }
+                None => {}
+            }
+        }
+    }
+
     let class = classify_op(op);
     let admitted_at = Instant::now();
     let deadline = admitted_at + rpc_timeout;
 
-    // Status coalesce: join an already-admitted status instead of enqueueing another.
+    // Atomic status elect-or-join (single lock hold).
+    let mut status_leader = false;
     if class == OpClass::Status {
-        if let Some(rx) = io.board.try_coalesce_status() {
-            return match tokio::time::timeout(
-                deadline.saturating_duration_since(Instant::now()),
-                rx,
-            )
-            .await
-            {
-                Ok(Ok(Ok(v))) => Ok(v),
-                Ok(Ok(Err(msg))) => Err(IpcError::from_transport_message(&msg, &io.launch_id, op)),
-                Ok(Err(_)) => Err(IpcError::connection_loss(
-                    "solver-engine pipe closed",
-                    &io.launch_id,
-                    io.child_exit.lock().ok().and_then(|g| g.clone()),
-                )),
-                Err(_) => Err(IpcError::timeout(
-                    TimeoutPhase::ReplyWait,
-                    "solver-engine IPC read timed out",
-                    op,
-                    None,
-                    true, // status soft timeout = degraded responsiveness
-                )),
-            };
+        match io.board.elect_status_role() {
+            StatusRole::Follower(rx) => {
+                return match tokio::time::timeout(
+                    deadline.saturating_duration_since(Instant::now()),
+                    rx,
+                )
+                .await
+                {
+                    Ok(Ok(Ok(v))) => Ok(v),
+                    Ok(Ok(Err(msg))) => {
+                        // Settled transport message — never invent connection_loss
+                        // from a local waiter timeout alone.
+                        Err(IpcError::from_transport_message(&msg, &io.launch_id, op))
+                    }
+                    Ok(Err(_)) => Err(IpcError::timeout(
+                        TimeoutPhase::ReplyWait,
+                        "status coalesce settled without payload (missed observation)",
+                        op,
+                        None,
+                        true,
+                    )),
+                    Err(_) => Err(IpcError::timeout(
+                        TimeoutPhase::ReplyWait,
+                        "solver-engine IPC read timed out",
+                        op,
+                        None,
+                        true,
+                    )),
+                };
+            }
+            StatusRole::Leader => {
+                status_leader = true;
+            }
         }
     }
 
-    // Bound outstanding count (Stop/Pause reserve for non-control).
     if let Err(err) = io.board.try_reserve_slot(class) {
+        if status_leader {
+            io.board.abandon_status_leader(err.clone());
+        }
         return Err(IpcError::queue_saturation(err));
     }
     let _outstanding = OutstandingGuard::new(Arc::clone(&io.board));
@@ -841,6 +1016,11 @@ async fn rpc_shared(
         let mut pending = match io.pending.lock() {
             Ok(g) => g,
             Err(_) => {
+                if status_leader {
+                    io.board.abandon_status_leader(
+                        "solver-engine pending lock poisoned".to_string(),
+                    );
+                }
                 return Err(IpcError::protocol_failure(
                     "solver-engine pending lock poisoned",
                     Some(request_id),
@@ -859,9 +1039,46 @@ async fn rpc_shared(
             },
         );
     }
-    if class == OpClass::Status {
-        io.board.begin_status_coalesce(&request_id);
+    if status_leader {
+        io.board.bind_status_leader(&request_id);
     }
+    if let Some(ref key) = reconcile_key {
+        if let Ok(mut ledger) = io.mutations.lock() {
+            if ledger.len() >= MUTATION_LEDGER_CAP {
+                // Drop an arbitrary settled entry to stay bounded.
+                let victim = ledger
+                    .iter()
+                    .find_map(|(k, v)| match v {
+                        MutationReceipt::Done { .. } => Some(k.clone()),
+                        _ => None,
+                    })
+                    .or_else(|| ledger.keys().next().cloned());
+                if let Some(k) = victim {
+                    ledger.remove(&k);
+                }
+            }
+            ledger.insert(
+                key.clone(),
+                MutationReceipt::InFlight {
+                    request_id: request_id.clone(),
+                },
+            );
+        }
+    }
+
+    let clear_mutation_inflight = |io: &SessionIo, key: &Option<String>, rid: &str| {
+        if let Some(k) = key {
+            if let Ok(mut ledger) = io.mutations.lock() {
+                let drop = matches!(
+                    ledger.get(k),
+                    Some(MutationReceipt::InFlight { request_id }) if request_id == rid
+                );
+                if drop {
+                    ledger.remove(k);
+                }
+            }
+        }
+    };
 
     let envelope = json!({
         "v": PROTOCOL,
@@ -877,8 +1094,16 @@ async fn rpc_shared(
             if let Ok(mut pending) = io.pending.lock() {
                 pending.remove(&request_id);
             }
-            if class == OpClass::Status {
-                let _ = io.board.take_status_coalesce(&request_id);
+            clear_mutation_inflight(io, &reconcile_key, &request_id);
+            if status_leader {
+                let waiters = io.board.take_status_coalesce(&request_id);
+                let typed = IpcError::protocol_failure(
+                    err.clone(),
+                    Some(request_id.clone()),
+                    Some(op.to_string()),
+                );
+                settle_status_followers(waiters, &Err(typed.clone()));
+                return Err(typed);
             }
             return Err(IpcError::protocol_failure(
                 err,
@@ -893,51 +1118,54 @@ async fn rpc_shared(
         if let Ok(mut pending) = io.pending.lock() {
             pending.remove(&request_id);
         }
-        if class == OpClass::Status {
-            let waiters = io.board.take_status_coalesce(&request_id);
-            let msg = format!(
-                "expired-before-write: status deadline elapsed before enqueue"
-            );
-            for w in waiters {
-                let _ = w.send(Err(msg.clone()));
-            }
-        }
-        return Err(IpcError::timeout(
+        clear_mutation_inflight(io, &reconcile_key, &request_id);
+        let typed = IpcError::timeout(
             TimeoutPhase::BeforeWrite,
             format!("expired-before-write: op {op} deadline elapsed before stdin enqueue"),
             op,
-            Some(request_id),
+            Some(request_id.clone()),
             false,
-        ));
+        );
+        if status_leader {
+            let waiters = io.board.take_status_coalesce(&request_id);
+            settle_status_followers(waiters, &Err(typed.clone()));
+        }
+        return Err(typed);
     }
 
-    let write_rx = match io.board.enqueue_write(op, frame, admitted_at, deadline) {
-        Ok(rx) => rx,
+    let write_ticket = match io.board.enqueue_write(op, frame, admitted_at, deadline) {
+        Ok(ticket) => ticket,
         Err(err) => {
             if let Ok(mut pending) = io.pending.lock() {
                 pending.remove(&request_id);
             }
-            if class == OpClass::Status {
-                let _ = io.board.take_status_coalesce(&request_id);
+            clear_mutation_inflight(io, &reconcile_key, &request_id);
+            let typed = IpcError::from_transport_message(&err, &io.launch_id, op);
+            if status_leader {
+                let waiters = io.board.take_status_coalesce(&request_id);
+                settle_status_followers(waiters, &Err(typed.clone()));
             }
-            return Err(IpcError::from_transport_message(&err, &io.launch_id, op));
+            return Err(typed);
         }
     };
+    let write_delivery = Arc::clone(&write_ticket.delivery);
+    let write_done_rx = write_ticket.done_rx;
 
-    // Await write (writer may reject with expired-before-write).
-    let write_outcome = match write_rx.await {
-        Ok(Ok(complete)) => complete,
-        Ok(Err(err)) => {
+    // Bound the wait for write completion. Cancel if still queued so the frame
+    // never reaches the sidecar; once Writing, outcome is unknown.
+    let write_wait = deadline.saturating_duration_since(Instant::now());
+    let write_outcome = match tokio::time::timeout(write_wait, write_done_rx).await {
+        Ok(Ok(Ok(complete))) => complete,
+        Ok(Ok(Err(err))) => {
             if let Ok(mut pending) = io.pending.lock() {
                 pending.remove(&request_id);
             }
-            if class == OpClass::Status {
-                let waiters = io.board.take_status_coalesce(&request_id);
-                for w in waiters {
-                    let _ = w.send(Err(err.clone()));
-                }
-            }
+            clear_mutation_inflight(io, &reconcile_key, &request_id);
             let typed = IpcError::from_transport_message(&err, &io.launch_id, op);
+            if status_leader {
+                let waiters = io.board.take_status_coalesce(&request_id);
+                settle_status_followers(waiters, &Err(typed.clone()));
+            }
             if typed.is_connection_loss()
                 || err.to_lowercase().contains("write:")
                 || err.to_lowercase().contains("broken pipe")
@@ -946,19 +1174,110 @@ async fn rpc_shared(
             }
             return Err(typed);
         }
-        Err(_) => {
+        Ok(Err(_)) => {
             if let Ok(mut pending) = io.pending.lock() {
                 pending.remove(&request_id);
             }
-            if class == OpClass::Status {
-                let _ = io.board.take_status_coalesce(&request_id);
-            }
+            clear_mutation_inflight(io, &reconcile_key, &request_id);
             let typed = IpcError::connection_loss(
                 "solver-engine writer dropped",
                 &io.launch_id,
                 io.child_exit.lock().ok().and_then(|g| g.clone()),
             );
+            if status_leader {
+                let waiters = io.board.take_status_coalesce(&request_id);
+                settle_status_followers(waiters, &Err(typed.clone()));
+            }
             fail_connection_once(io, typed.clone());
+            return Err(typed);
+        }
+        Err(_elapsed) => {
+            if solver_admission::WriteTicket::cancel_if_queued(&write_delivery) {
+                if let Ok(mut pending) = io.pending.lock() {
+                    pending.remove(&request_id);
+                }
+                clear_mutation_inflight(io, &reconcile_key, &request_id);
+                let typed = IpcError::timeout(
+                    TimeoutPhase::BeforeWrite,
+                    format!(
+                        "expired-before-write: op {op} deadline elapsed while queued \
+                         (never reached sidecar)"
+                    ),
+                    op,
+                    Some(request_id.clone()),
+                    false,
+                );
+                if status_leader {
+                    let waiters = io.board.take_status_coalesce(&request_id);
+                    settle_status_followers(waiters, &Err(typed.clone()));
+                }
+                return Err(typed);
+            }
+            // Writing or Written — frame order owned by writer; kill handle stays
+            // independent. Mark mutation unknown until reconciled.
+            let _state = solver_admission::WriteTicket::state_of(&write_delivery);
+            if let Some(ref key) = reconcile_key {
+                if let Ok(mut ledger) = io.mutations.lock() {
+                    ledger.insert(
+                        key.clone(),
+                        MutationReceipt::Unknown {
+                            request_id: request_id.clone(),
+                        },
+                    );
+                }
+            }
+            if let Ok(mut pending) = io.pending.lock() {
+                if let Some(w) = pending.get_mut(&request_id) {
+                    w.wrote_at = Some(Instant::now());
+                }
+            }
+            let typed = if is_mutating(op) {
+                IpcError::timeout(
+                    TimeoutPhase::AfterWrite,
+                    format!(
+                        "unknown-after-write: op {op} deadline elapsed after write started \
+                         (do not auto-replay Save/Open/Solve)"
+                    ),
+                    op,
+                    Some(request_id.clone()),
+                    false,
+                )
+            } else {
+                IpcError::timeout(
+                    TimeoutPhase::ReplyWait,
+                    "solver-engine IPC write/read timed out",
+                    op,
+                    Some(request_id.clone()),
+                    op == "status",
+                )
+            };
+            if status_leader {
+                let waiters = io.board.take_status_coalesce(&request_id);
+                settle_status_followers(waiters, &Err(typed.clone()));
+            }
+            record_diag(
+                io,
+                IpcDiagSample {
+                    launch_id: io.launch_id.clone(),
+                    request_id: Some(request_id.clone()),
+                    op: Some(op.to_string()),
+                    queue_wait_ms: None,
+                    write_duration_ms: None,
+                    reply_wait_ms: None,
+                    child_exit: None,
+                    outcome: if is_mutating(op) {
+                        "unknown_after_write".into()
+                    } else {
+                        "timeout".into()
+                    },
+                },
+                None,
+            );
+            if !is_mutating(op) {
+                if let Ok(mut pending) = io.pending.lock() {
+                    pending.remove(&request_id);
+                }
+            }
             return Err(typed);
         }
     };
@@ -969,102 +1288,167 @@ async fn rpc_shared(
             w.wrote_at = Some(Instant::now());
         }
     }
-    io.diag.record(IpcDiagSample {
-        launch_id: io.launch_id.clone(),
-        request_id: Some(request_id.clone()),
-        op: Some(op.to_string()),
-        queue_wait_ms: Some(duration_ms(write_outcome.queue_wait)),
-        write_duration_ms: Some(duration_ms(write_outcome.write_duration)),
-        reply_wait_ms: None,
-        child_exit: None,
-        outcome: "wrote".into(),
-    });
+    if let Some(ref key) = reconcile_key {
+        // Written: still in-flight until reply; unknown if we later time out.
+        let _ = key;
+    }
+    record_diag(
+        io,
+        IpcDiagSample {
+            launch_id: io.launch_id.clone(),
+            request_id: Some(request_id.clone()),
+            op: Some(op.to_string()),
+            queue_wait_ms: Some(duration_ms(write_outcome.queue_wait)),
+            write_duration_ms: Some(duration_ms(write_outcome.write_duration)),
+            reply_wait_ms: None,
+            child_exit: None,
+            outcome: "wrote".into(),
+        },
+        None,
+    );
 
     let remaining = deadline.saturating_duration_since(Instant::now());
     if remaining.is_zero() {
-        if let Ok(mut pending) = io.pending.lock() {
-            pending.remove(&request_id);
+        if let Some(ref key) = reconcile_key {
+            if let Ok(mut ledger) = io.mutations.lock() {
+                ledger.insert(
+                    key.clone(),
+                    MutationReceipt::Unknown {
+                        request_id: request_id.clone(),
+                    },
+                );
+            }
         }
-        if class == OpClass::Status {
-            let _ = io.board.take_status_coalesce(&request_id);
+        if !is_mutating(op) {
+            if let Ok(mut pending) = io.pending.lock() {
+                pending.remove(&request_id);
+            }
         }
-        if is_mutating(op) {
-            return Err(IpcError::timeout(
+        let typed = if is_mutating(op) {
+            IpcError::timeout(
                 TimeoutPhase::AfterWrite,
                 format!(
                     "unknown-after-write: op {op} deadline elapsed after stdin write \
                      (do not auto-replay Save/Open/Solve)"
                 ),
                 op,
-                Some(request_id),
+                Some(request_id.clone()),
                 false,
-            ));
+            )
+        } else {
+            IpcError::timeout(
+                TimeoutPhase::ReplyWait,
+                "solver-engine IPC read timed out",
+                op,
+                Some(request_id.clone()),
+                op == "status",
+            )
+        };
+        if status_leader {
+            let waiters = io.board.take_status_coalesce(&request_id);
+            settle_status_followers(waiters, &Err(typed.clone()));
         }
-        return Err(IpcError::timeout(
-            TimeoutPhase::ReplyWait,
-            "solver-engine IPC read timed out",
-            op,
-            Some(request_id),
-            op == "status",
-        ));
+        return Err(typed);
     }
 
-    let result = match tokio::time::timeout(remaining, reply_rx).await {
-        Ok(Ok(result)) => result,
-        Ok(Err(_)) => Err(IpcError::connection_loss(
-            "solver-engine pipe closed",
-            &io.launch_id,
-            io.child_exit.lock().ok().and_then(|g| g.clone()),
-        )),
-        Err(_) => {
-            if let Ok(mut pending) = io.pending.lock() {
-                pending.remove(&request_id);
-            }
-            if class == OpClass::Status {
-                let waiters = io.board.take_status_coalesce(&request_id);
-                for w in waiters {
-                    let _ = w.send(Err("solver-engine IPC read timed out".into()));
+    match tokio::time::timeout(remaining, reply_rx).await {
+        Ok(Ok(result)) => {
+            if let Some(ref key) = reconcile_key {
+                if let Ok(Ok(ref reply)) = result {
+                    if let Ok(mut ledger) = io.mutations.lock() {
+                        ledger.insert(
+                            key.clone(),
+                            MutationReceipt::Done {
+                                reply: reply.clone(),
+                            },
+                        );
+                    }
+                } else if let Ok(mut ledger) = io.mutations.lock() {
+                    // Transport-level Err after write — leave Unknown for reconcile.
+                    ledger.insert(
+                        key.clone(),
+                        MutationReceipt::Unknown {
+                            request_id: request_id.clone(),
+                        },
+                    );
                 }
             }
-            io.diag.record(IpcDiagSample {
-                launch_id: io.launch_id.clone(),
-                request_id: Some(request_id.clone()),
-                op: Some(op.to_string()),
-                queue_wait_ms: Some(duration_ms(write_outcome.queue_wait)),
-                write_duration_ms: Some(duration_ms(write_outcome.write_duration)),
-                reply_wait_ms: Some(duration_ms(remaining)),
-                child_exit: None,
-                outcome: if op == "status" {
-                    "degraded_timeout".into()
-                } else if is_mutating(op) {
-                    "unknown_after_write".into()
-                } else {
-                    "timeout".into()
-                },
-            });
-            if is_mutating(op) {
-                Err(IpcError::timeout(
+            result
+        }
+        Ok(Err(_)) => {
+            clear_mutation_inflight(io, &reconcile_key, &request_id);
+            Err(IpcError::connection_loss(
+                "solver-engine pipe closed",
+                &io.launch_id,
+                io.child_exit.lock().ok().and_then(|g| g.clone()),
+            ))
+        }
+        Err(_) => {
+            if let Some(ref key) = reconcile_key {
+                if let Ok(mut ledger) = io.mutations.lock() {
+                    ledger.insert(
+                        key.clone(),
+                        MutationReceipt::Unknown {
+                            request_id: request_id.clone(),
+                        },
+                    );
+                }
+            }
+            if !is_mutating(op) {
+                if let Ok(mut pending) = io.pending.lock() {
+                    pending.remove(&request_id);
+                }
+            } else if let Ok(mut pending) = io.pending.lock() {
+                // Keep pending so late reply can reconcile Done.
+                let _ = pending.get(&request_id);
+            }
+            let typed = if is_mutating(op) {
+                IpcError::timeout(
                     TimeoutPhase::AfterWrite,
                     format!(
                         "unknown-after-write: op {op} reply timed out after stdin write \
                          (do not auto-replay Save/Open/Solve)"
                     ),
                     op,
-                    Some(request_id),
+                    Some(request_id.clone()),
                     false,
-                ))
+                )
             } else {
-                Err(IpcError::timeout(
+                IpcError::timeout(
                     TimeoutPhase::ReplyWait,
                     "solver-engine IPC read timed out",
                     op,
-                    Some(request_id),
+                    Some(request_id.clone()),
                     op == "status",
-                ))
+                )
+            };
+            if status_leader {
+                let waiters = io.board.take_status_coalesce(&request_id);
+                settle_status_followers(waiters, &Err(typed.clone()));
             }
+            record_diag(
+                io,
+                IpcDiagSample {
+                    launch_id: io.launch_id.clone(),
+                    request_id: Some(request_id.clone()),
+                    op: Some(op.to_string()),
+                    queue_wait_ms: Some(duration_ms(write_outcome.queue_wait)),
+                    write_duration_ms: Some(duration_ms(write_outcome.write_duration)),
+                    reply_wait_ms: Some(duration_ms(remaining)),
+                    child_exit: None,
+                    outcome: if op == "status" {
+                        "degraded_timeout".into()
+                    } else if is_mutating(op) {
+                        "unknown_after_write".into()
+                    } else {
+                        "timeout".into()
+                    },
+                },
+                None,
+            );
+            Err(typed)
         }
-    };
-    result
+    }
 }
 
 async fn ready_handshake(io: &Arc<SessionIo>, launch_id: &str) -> Result<SolverEngineInfo, String> {
@@ -1160,14 +1544,21 @@ pub async fn ensure_solver_engine_session(
             Ok(_) => return Ok(info),
             Err(err) => {
                 let _ = launch_id;
-                // Only tear down the pipes we probed — not a newer install.
-                // Soft/protocol timeouts on ready still warrant reconnect; connection
-                // loss must not kill a newer launch B.
-                kill_solver_engine_if_current(
-                    state,
-                    &io,
-                    &format!("ensure ready probe failed: {err}"),
-                );
+                // Congestion / soft timeout / missed observation: preserve the
+                // healthy child (audit §3; TS decideReadyProbeOnExistingChild).
+                // Only connection_loss / process exit tears down.
+                if ready_probe_should_teardown(&err) {
+                    kill_solver_engine_if_current(
+                        state,
+                        &io,
+                        &format!("ensure ready probe failed: {err}"),
+                    );
+                } else {
+                    return Err(format!(
+                        "ready probe missed observation ({err}); existing child preserved \
+                         — use explicit Restart if the session stays unusable"
+                    ));
+                }
             }
         }
     }
@@ -1301,19 +1692,15 @@ pub async fn solver_engine_request(
     reply
 }
 
-/// Snapshot bounded IPC diagnostics for the current launch (tests / support).
+/// Snapshot bounded IPC diagnostics for support / UI.
+///
+/// Prefers the process-global last-launch ring (#457) so reconnect does not
+/// return an empty list solely because SessionIo was torn down.
 #[tauri::command]
 pub fn solver_engine_ipc_diagnostics(
-    state: State<'_, SolverEngineState>,
-) -> Result<Vec<IpcDiagSample>, String> {
-    let guard = state
-        .session
-        .lock()
-        .map_err(|_| "solver-engine state lock poisoned".to_string())?;
-    match guard.as_ref() {
-        Some(s) => Ok(s.io.diag.snapshot()),
-        None => Ok(Vec::new()),
-    }
+    _state: State<'_, SolverEngineState>,
+) -> Result<Vec<diagnostics::LaunchIpcSample>, String> {
+    Ok(diagnostics::ipc_diagnostics_for_support())
 }
 
 /// Clean app Exit — tear down sidecar without overwriting a useful last-fault.

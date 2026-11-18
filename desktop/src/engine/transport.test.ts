@@ -505,6 +505,22 @@ describe("solverEngineRequest honest errors", () => {
     expect(err.launchId).toBe("zig-abc");
     expect(err.message).toMatch(/pipe closed/i);
   });
+
+  it("preserves timeout phase on SolverIpcError (after_write Save)", () => {
+    const err = parseSolverIpcInvokeError(
+      {
+        class: "timeout",
+        phase: "after_write",
+        message: "unknown-after-write: op save reply timed out after stdin write",
+        op: "save",
+        request_id: "r9",
+      },
+      "save",
+    );
+    expect(err.ipcClass).toBe("timeout");
+    expect(err.phase).toBe("after_write");
+    expect(err.op).toBe("save");
+  });
 });
 
 describe("recorded fixture IPC boundary", () => {
