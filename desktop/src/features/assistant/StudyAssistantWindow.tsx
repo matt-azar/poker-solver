@@ -74,8 +74,10 @@ function assistantComposePlaceholder(): string {
 export function StudyAssistantWindow() {
   const layout = useHelpChatStore((s) => s.layout);
   const setVisible = useHelpChatStore((s) => s.setVisible);
+  const setPlacement = useHelpChatStore((s) => s.setPlacement);
   const setPosition = useHelpChatStore((s) => s.setPosition);
   const setSize = useHelpChatStore((s) => s.setSize);
+  const docked = layout.placement === "dock";
 
   const draft = useStudyStore((s) => s.draft);
   const draftRevision = useStudyStore((s) => s.draftRevision);
@@ -456,17 +458,26 @@ export function StudyAssistantWindow() {
       className="help-chat-window"
       role="dialog"
       aria-label="Study assistant"
-      style={{
-        left: layout.x,
-        top: layout.y,
-        width: layout.width,
-        height: layout.height,
-      }}
-      onPointerMove={onPanelPointerMove}
-      onPointerUp={onPanelPointerUp}
-      onPointerCancel={onPanelPointerUp}
+      data-placement={layout.placement}
+      style={
+        docked
+          ? undefined
+          : {
+              left: layout.x,
+              top: layout.y,
+              width: layout.width,
+              height: layout.height,
+            }
+      }
+      onPointerMove={docked ? undefined : onPanelPointerMove}
+      onPointerUp={docked ? undefined : onPanelPointerUp}
+      onPointerCancel={docked ? undefined : onPanelPointerUp}
     >
-      <div className="help-chat-window__title" onPointerDown={onTitlePointerDown}>
+      <div
+        className="help-chat-window__title"
+        onPointerDown={docked ? undefined : onTitlePointerDown}
+        data-docked={docked ? "true" : "false"}
+      >
         <div className="help-chat-window__title-text">
           <strong>Study assistant</strong>
           <span
@@ -485,6 +496,15 @@ export function StudyAssistantWindow() {
           </span>
         </div>
         <div className="help-chat-window__title-actions">
+          <button
+            type="button"
+            className="icon-btn"
+            title={docked ? "Float assistant" : "Dock assistant"}
+            aria-label={docked ? "Float assistant" : "Dock assistant"}
+            onClick={() => setPlacement(docked ? "float" : "dock")}
+          >
+            {docked ? "Float" : "Dock"}
+          </button>
           <button
             type="button"
             className="icon-btn"
@@ -764,13 +784,15 @@ export function StudyAssistantWindow() {
         </div>
       </div>
 
-      <div
-        className="help-chat-window__resize"
-        onPointerDown={onResizePointerDown}
-        title="Resize"
-        aria-label="Resize study assistant"
-        role="separator"
-      />
+      {docked ? null : (
+        <div
+          className="help-chat-window__resize"
+          onPointerDown={onResizePointerDown}
+          title="Resize"
+          aria-label="Resize study assistant"
+          role="separator"
+        />
+      )}
     </div>
   );
 }

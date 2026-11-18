@@ -2,9 +2,14 @@ import { create } from "zustand";
 
 const HELP_CHAT_KEY = "holdem-study-help-chat-v1";
 
+/** Floating overlay vs docked inspector pane (does not cover board/line). */
+export type AssistantPlacement = "float" | "dock";
+
 export interface HelpChatWindowLayout {
   /** When false the window is hidden but layout is kept. */
   visible: boolean;
+  /** float = draggable overlay; dock = side pane beside Study. */
+  placement: AssistantPlacement;
   x: number;
   y: number;
   width: number;
@@ -13,6 +18,7 @@ export interface HelpChatWindowLayout {
 
 export const DEFAULT_HELP_CHAT_LAYOUT: HelpChatWindowLayout = {
   visible: false,
+  placement: "float",
   x: 24,
   y: 72,
   width: 360,
@@ -38,8 +44,11 @@ function clampLayout(layout: HelpChatWindowLayout): HelpChatWindowLayout {
     x = Math.max(0, x);
     y = Math.max(0, y);
   }
+  const placement: AssistantPlacement =
+    layout.placement === "dock" ? "dock" : "float";
   return {
     visible: Boolean(layout.visible),
+    placement,
     x,
     y,
     width,
@@ -77,6 +86,7 @@ interface HelpChatState {
   layout: HelpChatWindowLayout;
   setVisible: (visible: boolean) => void;
   toggleVisible: () => void;
+  setPlacement: (placement: AssistantPlacement) => void;
   setPosition: (x: number, y: number) => void;
   setSize: (width: number, height: number) => void;
   setLayout: (partial: Partial<HelpChatWindowLayout>) => void;
@@ -103,6 +113,9 @@ export const useHelpChatStore = create<HelpChatState>((set, get) => ({
   toggleVisible() {
     const { layout } = get();
     commit(set, { ...layout, visible: !layout.visible });
+  },
+  setPlacement(placement) {
+    commit(set, { ...get().layout, placement });
   },
   setPosition(x, y) {
     commit(set, { ...get().layout, x, y });

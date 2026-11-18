@@ -1,0 +1,171 @@
+/*
+ * Surrounding chrome for NLHE redesign §7.
+ * Kept out of layout.css so Study/Build sibling layout edits stay disjoint.
+ */
+
+.status-bar {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+.status-bar[data-disconnected="true"] {
+  background: color-mix(in srgb, var(--danger) 12%, var(--panel));
+}
+
+.status-bar__reconnect {
+  font-weight: 700;
+}
+
+.status-bar__metrics {
+  max-width: none;
+}
+
+.status-bar__details-toggle {
+  flex-shrink: 0;
+}
+
+.status-bar__details {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1 1 100%;
+  padding: 2px 0 4px;
+  color: var(--muted);
+  border-top: 1px dashed var(--border);
+}
+
+.build-solve-prefs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-3);
+  padding: 6px var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.build-solve-prefs__head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 10rem;
+}
+
+.build-solve-prefs__title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.build-solve-prefs__hint {
+  font-size: 11px;
+}
+
+.build-solve-prefs__grid {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+
+.build-solve-prefs .settings-field {
+  margin: 0;
+  min-width: 5.5rem;
+}
+
+.build-solve-prefs .settings-field input {
+  width: 5.5rem;
+}
+
+.app-shell[data-assistant-dock="true"] {
+  --assistant-dock-w: min(380px, 36vw);
+}
+
+.app-shell[data-assistant-dock="true"] > .app-body {
+  margin-right: var(--assistant-dock-w);
+}
+
+.help-chat-window[data-placement="dock"] {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: auto;
+  width: var(--assistant-dock-w, 360px);
+  height: auto;
+  max-height: none;
+  border-radius: 0;
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+  box-shadow: none;
+  z-index: 40;
+}
+
+.help-chat-window[data-placement="dock"] .help-chat-window__title {
+  cursor: default;
+}
+
+.help-chat-window[data-placement="dock"] .help-chat-window__title[data-docked="true"] {
+  cursor: default;
+}
+
+.range-matrix[data-keyboard-nav="true"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.matrix-cell[data-focus="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  z-index: 1;
+}
+
+/* Phone: slim range-frequency strip before the matrix; collapse secondary chrome. */
+html[data-phone-demo="true"] .matrix-stage {
+  flex-direction: column;
+}
+
+html[data-phone-demo="true"] .study-detail-panel {
+  order: -1;
+  border-top: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+html[data-phone-demo="true"] .action-summary--panel {
+  padding: 4px 6px;
+  gap: 4px;
+  max-height: none;
+}
+
+html[data-phone-demo="true"] .action-summary__head,
+html[data-phone-demo="true"] .action-summary__legend,
+html[data-phone-demo="true"] .action-summary__mix {
+  display: none;
+}
+
+html[data-phone-demo="true"] .action-summary__blocks {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+html[data-phone-demo="true"] .action-summary--panel .action-block {
+  min-width: 4.25rem;
+  min-height: 22px;
+  flex: 0 0 auto;
+}
+
+html[data-phone-demo="true"] .action-summary--panel .action-block__main {
+  min-height: 22px;
+  padding: 1px 6px 3px;
+  font-size: 11px;
+}
+
+html[data-phone-demo="true"] .action-summary--panel .action-block__freq {
+  font-size: 10px;
+}
+
+/* Keep .demo-banner__secondary visible on phone — it hosts Download for Windows. */
