@@ -134,8 +134,8 @@ test.describe("browser preview: node locking", () => {
       .poll(async () => page.evaluate(() => window.__STUDY_PREVIEW_DEBUG__?.nodeId))
       .toBe("p0.t-1.r-1");
 
-    // Display label is pot-tag "b50" (chips 50 into pot 100).
-    await page.getByRole("button", { name: /^Open b50/i }).click();
+    // Current-decision nav uses readable labels (`Bet 50%`); path history stays compact.
+    await page.getByRole("button", { name: /^Open Bet 50%/i }).click();
     await expect
       .poll(async () => page.evaluate(() => window.__STUDY_PREVIEW_DEBUG__?.nodeId))
       .toBe("p2.t-1.r-1");
