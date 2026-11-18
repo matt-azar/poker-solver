@@ -168,6 +168,4 @@ html[data-phone-demo="true"] .action-summary--panel .action-block__freq {
   font-size: 10px;
 }
 
-html[data-phone-demo="true"] .demo-banner__secondary {
-  display: none;
-}
+/* Keep .demo-banner__secondary visible on phone — it hosts Download for Windows. */
