@@ -4,6 +4,13 @@ const std = @import("std");
 
 pub const protocol_version: u32 = 2;
 
+/// Protocol-2 hard payload ceiling (JSON body after the u32 length prefix).
+/// Desktop Rust framing and Zig `readFrame` already reject above 16 MiB; the
+/// outgoing encoder uses the same limit so oversized replies never enter stdout.
+/// CLI / river-beta historically allowed 64 MiB — protocol 2 documents **16 MiB**
+/// as the shared hard ceiling (admission byte budgets remain separate).
+pub const max_payload_bytes: u32 = 16 * 1024 * 1024;
+
 pub const FrameKind = enum {
     request,
     reply,
@@ -15,6 +22,7 @@ pub const IpcError = error{
     UnsupportedProtocol,
     OutOfMemory,
     BrokenPipe,
+    PayloadTooLarge,
 };
 
 pub const Envelope = struct {
@@ -85,67 +93,29 @@ fn writeJsonString(list: *std.ArrayList(u8), value: []const u8) IpcError!void {
     appendJsonString(list, value) catch return error.OutOfMemory;
 }
 
-/// Unescape a JSON string body (contents between quotes). Handles \\ \" \/ \\n \\r \\t \\uXXXX.
-pub fn unescapeJsonString(allocator: std.mem.Allocator, escaped: []const u8) error{OutOfMemory}![]u8 {
-    var raw = std.ArrayList(u8).init(allocator);
-    errdefer raw.deinit();
-    var i: usize = 0;
-    while (i < escaped.len) : (i += 1) {
-        if (escaped[i] == '\\' and i + 1 < escaped.len) {
-            switch (escaped[i + 1]) {
-                'n' => {
-                    try raw.append('\n');
-                    i += 1;
-                    continue;
-                },
-                'r' => {
-                    try raw.append('\r');
-                    i += 1;
-                    continue;
-                },
-                't' => {
-                    try raw.append('\t');
-                    i += 1;
-                    continue;
-                },
-                '\\' => {
-                    try raw.append('\\');
-                    i += 1;
-                    continue;
-                },
-                '"' => {
-                    try raw.append('"');
-                    i += 1;
-                    continue;
-                },
-                '/' => {
-                    try raw.append('/');
-                    i += 1;
-                    continue;
-                },
-                'u' => {
-                    if (i + 5 >= escaped.len) break;
-                    const hex = escaped[i + 2 .. i + 6];
-                    const code = std.fmt.parseInt(u21, hex, 16) catch break;
-                    var utf8_buf: [4]u8 = undefined;
-                    const n = std.unicode.utf8Encode(code, &utf8_buf) catch break;
-                    try raw.appendSlice(utf8_buf[0..n]);
-                    i += 5;
-                    continue;
-                },
-                else => {},
-            }
-        }
-        try raw.append(escaped[i]);
-    }
-    return raw.toOwnedSlice();
+/// Unescape a JSON string body (contents between quotes).
+/// Uses `std.json` so surrogate pairs (e.g. `\uD83C\uDCA1` → 🂡) and raw UTF-8
+/// both round-trip for checkpoint paths (IPC audit §6 / prompt §5).
+pub fn unescapeJsonString(allocator: std.mem.Allocator, escaped: []const u8) error{ OutOfMemory, InvalidJsonString }![]u8 {
+    var quoted = try allocator.alloc(u8, escaped.len + 2);
+    defer allocator.free(quoted);
+    quoted[0] = '"';
+    @memcpy(quoted[1 .. escaped.len + 1], escaped);
+    quoted[escaped.len + 1] = '"';
+
+    const parsed = std.json.parseFromSlice([]const u8, allocator, quoted, .{}) catch return error.InvalidJsonString;
+    defer parsed.deinit();
+    return allocator.dupe(u8, parsed.value) catch return error.OutOfMemory;
 }
 
 fn dupeUnescaped(allocator: std.mem.Allocator, escaped: []const u8) IpcError![]u8 {
     if (std.mem.indexOfScalar(u8, escaped, '\\') == null) {
         return allocator.dupe(u8, escaped) catch return error.OutOfMemory;
     }
-    return unescapeJsonString(allocator, escaped) catch return error.OutOfMemory;
+    return unescapeJsonString(allocator, escaped) catch |err| switch (err) {
+        error.OutOfMemory => error.OutOfMemory,
+        error.InvalidJsonString => error.InvalidFrame,
+    };
 }
 
 /// Encode one envelope to a length-prefixed frame.
@@ -183,6 +153,7 @@ pub fn encodeFrame(allocator: std.mem.Allocator, env: Envelope) IpcError![]u8 {
 
     const payload = try list.toOwnedSlice();
     defer allocator.free(payload);
+    if (payload.len > max_payload_bytes) return error.PayloadTooLarge;
     var frame = allocator.alloc(u8, 4 + payload.len) catch return error.OutOfMemory;
     std.mem.writeInt(u32, frame[0..4], @intCast(payload.len), .little);
     @memcpy(frame[4..], payload);
@@ -379,15 +350,33 @@ pub fn readFrame(allocator: std.mem.Allocator, reader: anytype) IpcError!Envelop
     var len_buf: [4]u8 = undefined;
     reader.readNoEof(&len_buf) catch return error.BrokenPipe;
     const len = std.mem.readInt(u32, &len_buf, .little);
-    if (len == 0 or len > 16 * 1024 * 1024) return error.InvalidFrame;
+    if (len == 0 or len > max_payload_bytes) return error.InvalidFrame;
     const payload = allocator.alloc(u8, len) catch return error.OutOfMemory;
     defer allocator.free(payload);
     reader.readNoEof(payload) catch return error.BrokenPipe;
     return decodePayload(allocator, payload);
 }
 
+/// Write one framed envelope. If the encoded payload exceeds `max_payload_bytes`,
+/// refuse that response and write a small structured `payload_too_large` error
+/// instead (same request_id / job_id / op) so stdout never receives the giant frame.
 pub fn writeFrame(allocator: std.mem.Allocator, writer: anytype, env: Envelope) IpcError!void {
-    const frame = try encodeFrame(allocator, env);
+    const frame = encodeFrame(allocator, env) catch |err| {
+        if (err != error.PayloadTooLarge) return err;
+        var refuse = try makeErrorReply(
+            allocator,
+            env.request_id,
+            env.job_id,
+            if (env.op.len != 0) env.op else "unknown",
+            "payload_too_large",
+            "response exceeds protocol-2 max payload (16 MiB)",
+        );
+        defer refuse.deinit();
+        const small = try encodeFrame(allocator, refuse);
+        defer allocator.free(small);
+        writer.writeAll(small) catch return error.BrokenPipe;
+        return;
+    };
     defer allocator.free(frame);
     writer.writeAll(frame) catch return error.BrokenPipe;
 }
@@ -499,4 +488,94 @@ test "decodePayload unescapes request_id and writeJsonString escapes controls" {
     defer list.deinit();
     try appendJsonString(&list, "a\"b\n\x01");
     try std.testing.expectEqualStrings("\"a\\\"b\\n\\u0001\"", list.items);
+}
+
+/// Playing-card Ace of Spades (U+1F0A1). Fixture encodings used by Unicode path tests.
+const ace_of_spades_utf8 = "\xf0\x9f\x82\xa1";
+const turn_checkpoint_utf8 = "Turn-" ++ ace_of_spades_utf8 ++ ".psol";
+/// JSON `\u` surrogate-pair encoding of the same filename (no surrounding quotes).
+const turn_checkpoint_surrogate_escaped = "Turn-\\uD83C\\uDCA1.psol";
+
+test "unescapeJsonString round-trips raw UTF-8 and surrogate-pair encodings" {
+    const from_raw = try unescapeJsonString(std.testing.allocator, turn_checkpoint_utf8);
+    defer std.testing.allocator.free(from_raw);
+    try std.testing.expectEqualStrings(turn_checkpoint_utf8, from_raw);
+
+    const from_esc = try unescapeJsonString(std.testing.allocator, turn_checkpoint_surrogate_escaped);
+    defer std.testing.allocator.free(from_esc);
+    try std.testing.expectEqualStrings(turn_checkpoint_utf8, from_esc);
+    try std.testing.expectEqualStrings(from_raw, from_esc);
+}
+
+test "decodePayload unescapes Unicode surrogate-pair request_id" {
+    // Envelope string field with surrogate-pair escape must not truncate after "Turn-".
+    const json =
+        \\{"v":2,"kind":"request","request_id":"Turn-\uD83C\uDCA1.psol","job_id":null,"op":"save","body":null}
+    ;
+    var decoded = try decodePayload(std.testing.allocator, json);
+    defer decoded.deinit();
+    try std.testing.expectEqualStrings(turn_checkpoint_utf8, decoded.request_id);
+}
+
+test "encodeFrame refuses payloads above protocol-2 ceiling" {
+    const over = max_payload_bytes + 1;
+    const body = try std.testing.allocator.alloc(u8, over);
+    defer std.testing.allocator.free(body);
+    @memset(body, 'x');
+
+    var env = Envelope{
+        .allocator = std.testing.allocator,
+        .kind = .reply,
+        .request_id = try std.testing.allocator.dupe(u8, "r-big"),
+        .op = try std.testing.allocator.dupe(u8, "values"),
+        .body_json = body,
+        .ok = true,
+    };
+    // body_json is borrowed for this test; clear before deinit so we free `body` ourselves.
+    defer {
+        env.body_json = &.{};
+        env.deinit();
+    }
+
+    const result = encodeFrame(std.testing.allocator, env);
+    try std.testing.expectError(error.PayloadTooLarge, result);
+}
+
+test "writeFrame substitutes small payload_too_large error for oversized reply" {
+    const over = max_payload_bytes + 1;
+    const body = try std.testing.allocator.alloc(u8, over);
+    defer std.testing.allocator.free(body);
+    @memset(body, 'y');
+
+    var env = Envelope{
+        .allocator = std.testing.allocator,
+        .kind = .reply,
+        .request_id = try std.testing.allocator.dupe(u8, "r-over"),
+        .job_id = try std.testing.allocator.dupe(u8, "j1"),
+        .op = try std.testing.allocator.dupe(u8, "node"),
+        .body_json = body,
+        .ok = true,
+    };
+    defer {
+        env.body_json = &.{};
+        env.deinit();
+    }
+
+    var out = std.ArrayList(u8).init(std.testing.allocator);
+    defer out.deinit();
+    try writeFrame(std.testing.allocator, out.writer(), env);
+
+    try std.testing.expect(out.items.len >= 4);
+    const len = std.mem.readInt(u32, out.items[0..4], .little);
+    try std.testing.expect(len < max_payload_bytes);
+    try std.testing.expectEqual(out.items.len - 4, len);
+
+    var decoded = try decodePayload(std.testing.allocator, out.items[4..]);
+    defer decoded.deinit();
+    try std.testing.expect(!decoded.ok);
+    try std.testing.expectEqualStrings("r-over", decoded.request_id);
+    try std.testing.expectEqualStrings("j1", decoded.job_id.?);
+    try std.testing.expectEqualStrings("node", decoded.op);
+    try std.testing.expectEqualStrings("payload_too_large", decoded.error_code.?);
+    try std.testing.expect(std.mem.indexOf(u8, decoded.error_message.?, "16 MiB") != null);
 }
