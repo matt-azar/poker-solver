@@ -1,6 +1,9 @@
 /**
  * Public demo chrome: Precomputed label, example/variant switchers,
  * shareable-URL sync, Download for Windows.
+ *
+ * Cursor-minimal: one slim strip — badge + example + quiet Download.
+ * Board/line live in Study green node nav, not here.
  */
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { useStudyStore } from "../state/studyStore";
@@ -91,6 +94,9 @@ export function DemoBanner() {
     : typeof config.manifest.board === "string"
       ? config.manifest.board
       : "";
+  const scenario = board
+    ? `${config.manifest.title} · ${board}`
+    : config.manifest.title;
 
   async function onExampleChange(exampleId: string) {
     deepLinkApplied.current = null;
@@ -112,13 +118,11 @@ export function DemoBanner() {
       data-phone={phoneDemo ? "true" : "false"}
     >
       <div className="demo-banner__meta">
-        <strong className="demo-banner__title">Hold’em Study</strong>
         <span className="demo-banner__badge" aria-label="Precomputed">
           Precomputed
         </span>
-        <span className="demo-banner__desc muted">
-          {config.manifest.title}
-          {board ? ` · ${board}` : ""}
+        <span className="demo-banner__desc muted" title={scenario}>
+          {scenario}
         </span>
       </div>
       <div className="demo-banner__controls">
@@ -154,7 +158,7 @@ export function DemoBanner() {
         ) : null}
         {phoneDemo ? null : (
           <a
-            className="toolbar-btn primary demo-banner__download"
+            className="demo-banner__download"
             href={downloadUrl}
             target="_blank"
             rel="noreferrer"

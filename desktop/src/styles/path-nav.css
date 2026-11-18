@@ -12,14 +12,18 @@
   position: relative;
   flex: 0 1 auto;
   background: var(--panel);
-  border-bottom: 1px solid var(--border);
-  min-height: 56px;
+  border-bottom: 0;
+  min-height: 40px;
   max-height: 28%;
   overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 0;
-  padding: 4px 0 6px;
+  padding: 2px 0 4px;
+}
+
+.study-node-nav .path-nav {
+  border-bottom: 0;
 }
 
 .path-nav[data-empty="true"] {

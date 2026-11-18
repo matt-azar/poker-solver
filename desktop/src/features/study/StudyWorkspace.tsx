@@ -1,8 +1,13 @@
 /**
- * Study page composition: context strip → path history → matrix + detail rail → lower dock.
+ * Study page composition: left column (node nav + matrix) + permanent right rail.
+ *
+ * Cursor-minimal regions (see project plan study-cursor-minimal-layout):
+ *   study-node-nav     board / line / history (wireframe green)
+ *   matrix-pane        primary strategy grid (wireframe blue)
+ *   study-detail-panel overall strategy + combo breakdowns (wireframe red)
  *
  * Visual tweaks usually belong in CSS, not here:
- *   styles/layout.css          chrome, Hands tiles, matrix shell
+ *   styles/layout.css          chrome, Hands tiles, matrix shell, column split
  *   styles/matrix-density.css  13×13 cell type
  *   styles/actions.css         Actions blocks in the detail rail
  *   styles/path-nav.css        action-history path strip
@@ -112,27 +117,33 @@ export function StudyWorkspace() {
       data-phone-demo={phoneDemo ? "true" : "false"}
     >
       <AlwaysOnNodeAnalysis />
-      <ContextStrip />
-      <ActionHistory />
-      <div className="study-main" data-nav="false">
-        <section
-          className="matrix-pane"
-          data-dual={dualRange ? "true" : "false"}
-          aria-label="Strategy matrix"
-        >
-          <MatrixModeToolbar />
-          <div className="matrix-stage">
-            {dualRange ? (
-              <div className="matrix-dual">
-                <RangeMatrix />
-                <OpponentRangePanel />
-              </div>
-            ) : (
-              <RangeMatrix />
-            )}
-            <StudyDetailPanel />
+      <div className="study-columns">
+        <div className="study-primary">
+          <div className="study-node-nav" aria-label="Node navigation">
+            <ContextStrip />
+            <ActionHistory />
           </div>
-        </section>
+          <div className="study-main" data-nav="false">
+            <section
+              className="matrix-pane"
+              data-dual={dualRange ? "true" : "false"}
+              aria-label="Strategy matrix"
+            >
+              <MatrixModeToolbar />
+              <div className="matrix-stage">
+                {dualRange ? (
+                  <div className="matrix-dual">
+                    <RangeMatrix />
+                    <OpponentRangePanel />
+                  </div>
+                ) : (
+                  <RangeMatrix />
+                )}
+              </div>
+            </section>
+          </div>
+        </div>
+        <StudyDetailPanel />
       </div>
       {phoneDemo ? null : <LowerDock />}
       {lockDrawerOpen ? <LockDrawer /> : null}
