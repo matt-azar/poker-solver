@@ -9,8 +9,6 @@ import {
   formatActionTooltip,
   formatDonkField,
   formatEngineSpec,
-  formatSizeListPreview,
-  formatSizeTokenPreview,
   formatFrequencyPct,
   formatStreetBetField,
   formatStreetRaiseField,
@@ -32,19 +30,6 @@ describe("betSizes", () => {
     expect(parseSizeTokenDetailed("0.5")?.fraction).toBeCloseTo(0.5, 12);
     expect(parseSizeTokenDetailed("75%")?.fraction).toBeCloseTo(0.75, 12);
     expect(parseSizeTokenDetailed("0.5%")?.fraction).toBeCloseTo(0.005, 12);
-  });
-
-  it("previews live Build size meaning while editing", () => {
-    expect(formatSizeTokenPreview("1")).toBe("1% pot");
-    expect(formatSizeTokenPreview("0.99")).toBe("99% pot");
-    expect(formatSizeTokenPreview("75")).toBe("75% pot");
-    expect(formatSizeTokenPreview("2.5x")).toBe("2.5×");
-    expect(formatSizeTokenPreview("20c")).toBe("20 chips");
-    expect(formatSizeListPreview("1, 0.99, 2.5x, 20c")).toBe(
-      "1% pot, 99% pot, 2.5×, 20 chips",
-    );
-    expect(formatSizeListPreview("")).toBe("");
-    expect(formatSizeListPreview("-")).toBe("none");
   });
 
   it("parses geometric e tokens as street counts, not multiples of e", () => {

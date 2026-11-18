@@ -9,7 +9,7 @@ export type { WorkspaceId };
 const WORKSPACES: Array<{ id: WorkspaceId; label: string }> = [
   { id: "study", label: "Study" },
   { id: "build", label: "Build" },
-  { id: "equity", label: "Equity calculator" },
+  { id: "equity", label: "Equity" },
   { id: "compare", label: "Compare" },
   { id: "library", label: "Library" },
 ];
