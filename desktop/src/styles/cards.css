@@ -251,7 +251,8 @@ button.playing-card {
 }
 
 .card-picker-cell[data-blocked="true"],
-.card-picker-cell[data-missing="true"] {
+.card-picker-cell[data-missing="true"],
+.card-picker-cell[data-unrecorded="true"] {
   opacity: 1; /* fading is on the PlayingCard face */
 }
 

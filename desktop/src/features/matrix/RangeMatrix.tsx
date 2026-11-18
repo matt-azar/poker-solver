@@ -192,6 +192,11 @@ export function RangeMatrix() {
   const valueBluffsHighlight = useValueBluffsHighlightStore(
     (s) => s.highlightCells,
   );
+  const analysisFilterLabel = useValueBluffsHighlightStore((s) => s.label);
+  const analysisFilterSource = useValueBluffsHighlightStore((s) => s.source);
+  const clearAnalysisHighlight = useValueBluffsHighlightStore(
+    (s) => s.clearHighlight,
+  );
   const equity = useStudyStore((s) => s.equity);
   const displayPrefs = useMatrixDisplayStore((s) => s.prefs);
   const dualRange = useStudyStore((s) => s.layout.dualRange);
@@ -293,6 +298,21 @@ export function RangeMatrix() {
           : undefined
       }
     >
+      {valueBluffsHighlight != null &&
+      analysisFilterLabel &&
+      (analysisFilterSource === "equity-bands" ||
+        analysisFilterSource === "categories") ? (
+        <div className="matrix-analysis-filter" role="status">
+          <span>{analysisFilterLabel}</span>
+          <button
+            type="button"
+            className="toolbar-btn"
+            onClick={() => clearAnalysisHighlight()}
+          >
+            Clear filter
+          </button>
+        </div>
+      ) : null}
       <div className="range-matrix-stage" ref={stageRef}>
         <div
           className="range-matrix matrix-density range-matrix--no-axis"
