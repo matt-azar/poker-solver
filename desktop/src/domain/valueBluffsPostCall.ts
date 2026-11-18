@@ -7,17 +7,22 @@ import { equityHandsForNode } from "./matrixDisplay";
 import {
   MIN_VALUE_BLUFFS_BET_FREQ,
   callChildIdFromFacing,
-  dominantBettingActionIndices,
   equityHandsForDominantSizes,
   facingChildIdForBet,
+  valueBluffsBettingActionIndices,
 } from "./valueBluffs";
 import type { NodePayload } from "./types";
 
 export interface PostCallEquityResult {
   hands: EquityHandRow[];
+  /**
+   * Per bet/raise/all-in action index → acting-seat equity at that size's Call
+   * child. Used to re-join after-call equity when size toggles change.
+   */
+  handsByBetAction: Map<number, EquityHandRow[]>;
   /** Call-child node ids that were queried. */
   callNodeIds: string[];
-  /** Dominant bet sizes that had no Call child. */
+  /** Bet sizes that had no Call child. */
   missingCallCount: number;
   /** Human-readable failure when nothing usable was loaded. */
   error: string | null;
@@ -83,6 +88,37 @@ export type PostCallHostDeps = PostCallFetchDeps & {
   ) => Promise<unknown>;
 };
 
+function handsByActionFromHost(
+  raw: {
+    hands_by_action?: Array<{
+      action_index?: number;
+      hands?: Array<{ combo?: string; equity?: number; weight?: number }>;
+    }>;
+  },
+): Map<number, EquityHandRow[]> {
+  const map = new Map<number, EquityHandRow[]>();
+  if (!Array.isArray(raw.hands_by_action)) {
+    return map;
+  }
+  for (const entry of raw.hands_by_action) {
+    const actionIndex = Number(entry?.action_index);
+    if (!Number.isInteger(actionIndex) || actionIndex < 0) {
+      continue;
+    }
+    const hands = Array.isArray(entry?.hands)
+      ? entry.hands
+          .filter((hand) => hand?.combo)
+          .map((hand) => ({
+            combo: String(hand.combo),
+            equity: Number(hand.equity),
+            weight: Number(hand.weight ?? 0),
+          }))
+      : [];
+    map.set(actionIndex, hands);
+  }
+  return map;
+}
+
 function postCallResultFromHostBody(body: unknown): PostCallEquityResult | null {
   if (!body || typeof body !== "object") {
     return null;
@@ -91,6 +127,10 @@ function postCallResultFromHostBody(body: unknown): PostCallEquityResult | null 
     pending?: boolean;
     kind?: string;
     hands?: Array<{ combo?: string; equity?: number; weight?: number }>;
+    hands_by_action?: Array<{
+      action_index?: number;
+      hands?: Array<{ combo?: string; equity?: number; weight?: number }>;
+    }>;
     call_node_ids?: string[];
     missing_call_count?: number;
     error?: string | null;
@@ -112,6 +152,7 @@ function postCallResultFromHostBody(body: unknown): PostCallEquityResult | null 
         equity: Number(hand.equity),
         weight: Number(hand.weight ?? 0),
       })),
+    handsByBetAction: handsByActionFromHost(raw),
     callNodeIds: Array.isArray(raw.call_node_ids)
       ? raw.call_node_ids.map(String)
       : [],
@@ -121,9 +162,9 @@ function postCallResultFromHostBody(body: unknown): PostCallEquityResult | null 
 }
 
 /**
- * For each dominant betting size on `node`, walk bet → facing → Call and load
+ * For each betting size on `node`, walk bet → facing → Call and load
  * check-down equity at the Call child. Returns synthetic acting-seat hands
- * keyed by each combo's max-prob size.
+ * keyed by each combo's max-prob size, plus per-size maps for size filters.
  *
  * Prefers a single host `value_bluffs_post_call` when available.
  */
@@ -159,10 +200,11 @@ export async function fetchPostCallEquityHands(args: {
     }
   }
 
-  const actionIndices = dominantBettingActionIndices(node, minBetFreq);
+  const actionIndices = valueBluffsBettingActionIndices(node.actions);
   if (!actionIndices.length) {
     return {
       hands: [],
+      handsByBetAction: new Map(),
       callNodeIds: [],
       missingCallCount: 0,
       error: "No betting actions with frequency ≥ 1%.",
@@ -225,9 +267,17 @@ export async function fetchPostCallEquityHands(args: {
     minBetFreq,
   });
 
+  const definedByAction = new Map<number, EquityHandRow[]>();
+  for (const [actionIndex, actionHands] of handsByBetAction) {
+    if (actionHands?.length) {
+      definedByAction.set(actionIndex, actionHands);
+    }
+  }
+
   if (!hands.length) {
     return {
       hands,
+      handsByBetAction: definedByAction,
       callNodeIds,
       missingCallCount,
       error:
@@ -239,6 +289,7 @@ export async function fetchPostCallEquityHands(args: {
 
   return {
     hands,
+    handsByBetAction: definedByAction,
     callNodeIds,
     missingCallCount,
     error: null,

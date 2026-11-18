@@ -424,23 +424,20 @@ pub fn buildValueBluffsPostCallBody(
 
     const n_actions = hero.actions.len;
     const n_hands = hero.combos.len;
-    var dominant = try allocator.alloc(u8, n_actions);
-    defer allocator.free(dominant);
-    @memset(dominant, 0);
-
-    var hand: usize = 0;
-    while (hand < n_hands) : (hand += 1) {
-        if (n_actions == 0) break;
-        const row = if (hero.strategy.len >= (hand + 1) * n_actions)
-            hero.strategy[hand * n_actions .. hand * n_actions + n_actions]
-        else
-            &[_]f32{};
-        if (!(betFrequency(row, hero.actions) >= min_bet_freq)) continue;
-        const idx = topBettingActionIndex(row, hero.actions);
-        if (idx >= 0) dominant[@intCast(idx)] = 1;
+    // Fetch Call-child equity for every betting action so size toggles can
+    // re-join after-call equity at a non-dominant size. Still join `hands`
+    // by each combo's dominant size for back-compat.
+    var fetch_action = try allocator.alloc(u8, n_actions);
+    defer allocator.free(fetch_action);
+    @memset(fetch_action, 0);
+    {
+        var ai: usize = 0;
+        while (ai < n_actions) : (ai += 1) {
+            if (isBettingAction(hero.actions[ai])) fetch_action[ai] = 1;
+        }
     }
 
-    // Per dominant bet: facing → Call → equity hands keyed by combo.
+    // Per betting size: facing → Call → equity hands keyed by combo.
     const HandEq = struct { equity: f64, weight: f64, defined: bool = false };
     var by_action = try allocator.alloc(?[]HandEq, n_actions);
     defer {
@@ -460,7 +457,7 @@ pub fn buildValueBluffsPostCallBody(
 
     var a: usize = 0;
     while (a < n_actions) : (a += 1) {
-        if (dominant[a] == 0) continue;
+        if (fetch_action[a] == 0) continue;
         if (a >= hero.children.len or hero.children[a].len == 0) {
             missing += 1;
             continue;
@@ -543,6 +540,7 @@ pub fn buildValueBluffsPostCallBody(
     }
 
     // Join: each combo uses equity from its dominant betting size's Call child.
+    // Also emit hands_by_action so the Study UI can re-join for size filters.
     var list = std.ArrayList(u8).init(allocator);
     errdefer list.deinit();
     const w = list.writer();
@@ -558,11 +556,34 @@ pub fn buildValueBluffsPostCallBody(
         if (i > 0) try w.writeAll(",");
         try appendJsonString(&list, id);
     }
-    try w.print("],\"missing_call_count\":{d},\"hands\":[", .{missing});
+    try w.print("],\"missing_call_count\":{d},\"hands_by_action\":[", .{missing});
+
+    var first_action = true;
+    a = 0;
+    while (a < n_actions) : (a += 1) {
+        const slot = by_action[a] orelse continue;
+        if (!first_action) try w.writeAll(",");
+        first_action = false;
+        try w.print("{{\"action_index\":{d},\"hands\":[", .{a});
+        var first_hand = true;
+        var hi: usize = 0;
+        while (hi < n_hands) : (hi += 1) {
+            const he = slot[hi];
+            if (!he.defined) continue;
+            if (!first_hand) try w.writeAll(",");
+            first_hand = false;
+            try w.writeAll("{\"combo\":");
+            try appendJsonString(&list, hero.combos[hi]);
+            try w.print(",\"equity\":{d:.6},\"weight\":{d:.6}}}", .{ he.equity, he.weight });
+        }
+        try w.writeAll("]}");
+    }
+
+    try w.writeAll("],\"hands\":[");
 
     var first = true;
     var any = false;
-    hand = 0;
+    var hand: usize = 0;
     while (hand < n_hands) : (hand += 1) {
         const row = if (hero.strategy.len >= (hand + 1) * n_actions)
             hero.strategy[hand * n_actions .. hand * n_actions + n_actions]

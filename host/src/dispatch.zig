@@ -7076,6 +7076,7 @@ test "value_bluffs_post_call flop bet returns hands shape" {
     try std.testing.expect(reply.ok);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"kind\":\"value_bluffs_post_call\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"hands\":[") != null);
+    try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"hands_by_action\":[") != null);
     try std.testing.expect(std.mem.indexOf(u8, reply.body_json, "\"call_node_ids\":[") != null);
 }
 
