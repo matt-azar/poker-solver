@@ -282,8 +282,9 @@ jobs:
           Get-ChildItem -Recurse desktop/src-tauri/target/release/bundle -ErrorAction SilentlyContinue |
             Select-Object FullName, Length
 
-  # Stage A + Stage B + DelayedReply against the exact NSIS artifact from the
-  # preceding job (PR installer when available; else the same-commit artifact).
+  # Stage A + Stage B + DelayedReply + BlockedWrite / NormalClosePending /
+  # StaleCallAfterReconnect against the exact NSIS artifact from the preceding
+  # job (PR installer when available; else the same-commit artifact).
   # Stage B keeps the real-engine river Save/reopen path.
   windows-installer-e2e:
     needs: windows-installer
@@ -390,52 +391,83 @@ jobs:
           }
 
       # ------------------------------------------------------------------
-      # TODO(ipc-audit-2026-11-18 §7 Support and CI): enable when product
-      # STUDY_INSTALLER_E2E hooks land (other tracks). Do not invent a second
-      # engine. Named future targets for windows-installer-e2e.ps1:
+      # Audit §7 Support and CI: installer IPC probes (product hooks from #465).
+      # windows-installer-e2e.ps1 maps -Stage → STUDY_INSTALLER_E2E:
       #
       #   -Stage BlockedWrite
-      #       Genuinely blocked stdin write under deadline (not stop-reading
-      #       soft timeout alone). Product: STUDY_INSTALLER_E2E=stage-blocked-write
-      #       and/or Rust supervisor blocked-write probe wired here.
+      #       STUDY_INSTALLER_E2E=stage-blocked-write
+      #       (may SKIP until Rust arms stop-reading via STUDY_SOLVER_ENGINE_ARGS)
       #
       #   -Stage NormalClosePending
-      #       Normal window Close while work is pending (not process::exit
-      #       test-exit hook). Product: STUDY_INSTALLER_E2E=stage-normal-close-pending
+      #       STUDY_INSTALLER_E2E=stage-normal-close-pending
       #
       #   -Stage StaleCallAfterReconnect
-      #       Stale invoke after kill+ensure must not settle on the new launch.
-      #       Product: STUDY_INSTALLER_E2E=stage-stale-call-after-reconnect
+      #       STUDY_INSTALLER_E2E=stage-stale-call-after-reconnect
       #
-      # Flip `if: false` → true (or drop the guard) once ValidateSet + WebView
-      # boot hooks exist. Keep Stage B river Save/reopen above.
+      # Keep Stage B river Save/reopen and DelayedReply above. No second engine.
       # ------------------------------------------------------------------
-      - name: "TODO Installer E2E Stage BlockedWrite (awaiting product hook)"
-        if: false
+      - name: Installer E2E Stage BlockedWrite (write-bound / admission)
         shell: pwsh
+        env:
+          HOLDEM_STUDY_DIAGNOSTICS_DIR: ${{ runner.temp }}\holdem-study-e2e-diagnostics-blocked-write
         run: |
+          $ErrorActionPreference = "Stop"
+          $out = Join-Path $env:RUNNER_TEMP "windows-installer-e2e-blocked-write"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:HOLDEM_STUDY_DIAGNOSTICS_DIR | Out-Null
           & "$env:GITHUB_WORKSPACE\scripts\desktop\windows-installer-e2e.ps1" `
             -InstallerExe "${{ steps.resolve.outputs.installer }}" `
             -Stage BlockedWrite `
-            -OutDir "$env:RUNNER_TEMP\windows-installer-e2e-blocked-write"
+            -OutDir $out
+          if ($LASTEXITCODE -ne 0) {
+            $stepFile = Join-Path $out "last-completed-step.txt"
+            if (Test-Path $stepFile) {
+              Write-Host "FAIL lastCompletedStep=$(Get-Content $stepFile -Raw)"
+            }
+            throw "windows-installer-e2e.ps1 Stage BlockedWrite failed (exit $LASTEXITCODE)"
+          }
 
-      - name: "TODO Installer E2E Stage NormalClosePending (awaiting product hook)"
-        if: false
+      - name: Installer E2E Stage NormalClosePending (Close while work pending)
         shell: pwsh
+        env:
+          HOLDEM_STUDY_DIAGNOSTICS_DIR: ${{ runner.temp }}\holdem-study-e2e-diagnostics-normal-close-pending
         run: |
+          $ErrorActionPreference = "Stop"
+          $out = Join-Path $env:RUNNER_TEMP "windows-installer-e2e-normal-close-pending"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:HOLDEM_STUDY_DIAGNOSTICS_DIR | Out-Null
           & "$env:GITHUB_WORKSPACE\scripts\desktop\windows-installer-e2e.ps1" `
             -InstallerExe "${{ steps.resolve.outputs.installer }}" `
             -Stage NormalClosePending `
-            -OutDir "$env:RUNNER_TEMP\windows-installer-e2e-normal-close-pending"
+            -OutDir $out
+          if ($LASTEXITCODE -ne 0) {
+            $stepFile = Join-Path $out "last-completed-step.txt"
+            if (Test-Path $stepFile) {
+              Write-Host "FAIL lastCompletedStep=$(Get-Content $stepFile -Raw)"
+            }
+            throw "windows-installer-e2e.ps1 Stage NormalClosePending failed (exit $LASTEXITCODE)"
+          }
 
-      - name: "TODO Installer E2E Stage StaleCallAfterReconnect (awaiting product hook)"
-        if: false
+      - name: Installer E2E Stage StaleCallAfterReconnect (stale invoke after kill+ensure)
         shell: pwsh
+        env:
+          HOLDEM_STUDY_DIAGNOSTICS_DIR: ${{ runner.temp }}\holdem-study-e2e-diagnostics-stale-call-after-reconnect
         run: |
+          $ErrorActionPreference = "Stop"
+          $out = Join-Path $env:RUNNER_TEMP "windows-installer-e2e-stale-call-after-reconnect"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:HOLDEM_STUDY_DIAGNOSTICS_DIR | Out-Null
           & "$env:GITHUB_WORKSPACE\scripts\desktop\windows-installer-e2e.ps1" `
             -InstallerExe "${{ steps.resolve.outputs.installer }}" `
             -Stage StaleCallAfterReconnect `
-            -OutDir "$env:RUNNER_TEMP\windows-installer-e2e-stale-call-after-reconnect"
+            -OutDir $out
+          if ($LASTEXITCODE -ne 0) {
+            $stepFile = Join-Path $out "last-completed-step.txt"
+            if (Test-Path $stepFile) {
+              Write-Host "FAIL lastCompletedStep=$(Get-Content $stepFile -Raw)"
+            }
+            throw "windows-installer-e2e.ps1 Stage StaleCallAfterReconnect failed (exit $LASTEXITCODE)"
+          }
 
       - name: Upload installer E2E logs / diagnostics
         if: always()
@@ -446,7 +478,13 @@ jobs:
             ${{ runner.temp }}/windows-installer-e2e-a/**
             ${{ runner.temp }}/windows-installer-e2e-b/**
             ${{ runner.temp }}/windows-installer-e2e-delayed-reply/**
+            ${{ runner.temp }}/windows-installer-e2e-blocked-write/**
+            ${{ runner.temp }}/windows-installer-e2e-normal-close-pending/**
+            ${{ runner.temp }}/windows-installer-e2e-stale-call-after-reconnect/**
             ${{ runner.temp }}/holdem-study-e2e-diagnostics/**
             ${{ runner.temp }}/holdem-study-e2e-diagnostics-b/**
             ${{ runner.temp }}/holdem-study-e2e-diagnostics-delayed-reply/**
+            ${{ runner.temp }}/holdem-study-e2e-diagnostics-blocked-write/**
+            ${{ runner.temp }}/holdem-study-e2e-diagnostics-normal-close-pending/**
+            ${{ runner.temp }}/holdem-study-e2e-diagnostics-stale-call-after-reconnect/**
           if-no-files-found: warn
