@@ -7,6 +7,26 @@ import type {
   TreePreviewPayload,
 } from "../domain/types";
 import { presentUserText } from "../domain/userText";
+import {
+  applyOpenJobLocalReset,
+  beginPendingJob,
+  buildTrainRequestBody,
+  commitJobOnAdmission,
+  createCompositeSolveIntent,
+  defaultStopJobId,
+  emptyJobIdBook,
+  interpretCancelReply,
+  isTrainAdmissionSuccess,
+  latchSolveCancel,
+  maySendTrain,
+  noteBuildComplete,
+  noteSolveTerminal,
+  noteTrainAdmitted,
+  stopAppliesDuringBuild,
+  type CancelAck,
+  type CompositeSolveIntent,
+  type JobIdBook,
+} from "../domain/jobIntent";
 import { isTauriRuntime } from "../platform";
 import { decodeErrorPayload } from "./contracts/error";
 import { decodeStatusPayload } from "./contracts/status";
@@ -116,12 +136,29 @@ async function readBody(response: Response): Promise<unknown> {
   }
 }
 
+type TrainAdmissionReply = {
+  accepted?: boolean;
+  running?: boolean;
+  busy?: boolean;
+  error_code?: string | null;
+  solution_id?: number | string;
+  baseline_solution_id?: number | string;
+  policy_revision?: number;
+  trained?: number;
+  terminal_reason?: string;
+  threads?: number;
+};
+
 export class EngineClient {
   private readonly constructorBaseUrl: string | undefined;
   private runtimeBaseUrl: string | undefined;
   private readonly fetchImpl: typeof fetch;
-  /** Last minted Study train job id (ZR-90 stop/cancel). */
-  private lastJobId: string | null = null;
+  /** Authoritative vs pending Study train ids — promote only on admission. */
+  private jobBook: JobIdBook = emptyJobIdBook();
+  /** Composite Build→Train cancel latch for the in-flight Solve. */
+  private solveIntent: CompositeSolveIntent | null = null;
+  /** Last cancel interpretation for Study Stop presentation. */
+  private lastCancelAck: CancelAck | null = null;
 
   constructor(options: EngineClientOptions = {}) {
     this.constructorBaseUrl =
@@ -129,13 +166,78 @@ export class EngineClient {
     this.fetchImpl = options.fetchImpl ?? fetch.bind(globalThis);
   }
 
+  /**
+   * Default Stop/Pause target: admitted active id, else pending Build→Train id.
+   * Pending alone is never preferred over an admitted active job.
+   */
   lastStudyJobId(): string | null {
-    return this.lastJobId;
+    return defaultStopJobId(this.jobBook) ?? this.jobBook.pendingJobId;
   }
 
-  /** Drop stale Study job id after sidecar respawn / session recovery (ZR-123). */
+  /** Drop stale Study job book after sidecar respawn / session recovery (ZR-123). */
   clearLastStudyJobId(): void {
-    this.lastJobId = null;
+    this.jobBook = emptyJobIdBook();
+    this.solveIntent = null;
+    this.lastCancelAck = null;
+  }
+
+  /** Last Stop/cancel acknowledgement (Build-handoff noop vs cancelled). */
+  lastStopAck(): CancelAck | null {
+    return this.lastCancelAck;
+  }
+
+  /**
+   * Soft-recover after a train RPC timeout: if the host is still training,
+   * promote pending → active so default Stop targets the live job.
+   */
+  adoptPendingJobIfRunning(status: {
+    running?: boolean;
+    job_id?: string | null;
+  }): void {
+    if (!status.running) {
+      return;
+    }
+    if (this.jobBook.pendingJobId) {
+      this.jobBook = {
+        activeJobId: this.jobBook.pendingJobId,
+        pendingJobId: null,
+      };
+      if (this.solveIntent && !this.solveIntent.cancelLatched) {
+        this.solveIntent = noteTrainAdmitted(this.solveIntent);
+      }
+      return;
+    }
+    const hostJob =
+      typeof status.job_id === "string" && status.job_id.trim()
+        ? status.job_id.trim()
+        : null;
+    if (hostJob && !this.jobBook.activeJobId) {
+      this.jobBook = { activeJobId: hostJob, pendingJobId: null };
+    }
+  }
+
+  private cancelTargetJobId(explicit?: string): string | null {
+    if (explicit) {
+      return explicit;
+    }
+    if (this.solveIntent && stopAppliesDuringBuild(this.solveIntent)) {
+      return this.solveIntent.jobId;
+    }
+    return defaultStopJobId(this.jobBook) ?? this.jobBook.pendingJobId;
+  }
+
+  private commitTrainAdmission(
+    jobId: string,
+    reply: TrainAdmissionReply,
+  ): boolean {
+    this.jobBook = commitJobOnAdmission(this.jobBook, reply);
+    const admitted = isTrainAdmissionSuccess(reply);
+    if (this.solveIntent?.jobId === jobId) {
+      this.solveIntent = admitted
+        ? noteTrainAdmitted(this.solveIntent)
+        : noteSolveTerminal(this.solveIntent);
+    }
+    return admitted;
   }
 
   /** Packaged Study sets this after `ensureEngine()` resolves the owned sidecar. */
@@ -271,44 +373,65 @@ export class EngineClient {
         throw new EngineError("aborted", 0, null);
       }
       const configText = formatSolveJobStreetConfig(job);
-      const iterations = Math.max(1, Math.trunc(job.iterations || 1));
+      const trainFields = buildTrainRequestBody("solve", {
+        iterations: job.iterations,
+        samples: job.samples,
+        accuracy: job.accuracy,
+        time_limit: job.time_limit,
+      });
+      const iterations = trainFields.iterations as number;
       const jobId = mintStudyJobId();
-      this.lastJobId = jobId;
+      this.jobBook = beginPendingJob(this.jobBook, jobId);
+      this.solveIntent = createCompositeSolveIntent(jobId);
+      this.lastCancelAck = null;
       await ipcBeginConfig(configText, jobId);
-      if (signal?.aborted) {
-        throw new EngineError("aborted", 0, null);
+      let intent = this.solveIntent;
+      if (intent?.jobId === jobId) {
+        intent = noteBuildComplete(intent);
+        this.solveIntent = intent;
       }
-      const accuracy =
-        typeof job.accuracy === "number" && Number.isFinite(job.accuracy)
-          ? job.accuracy
-          : undefined;
-      const time_limit =
-        typeof job.time_limit === "number" && Number.isFinite(job.time_limit)
-          ? job.time_limit
-          : undefined;
+      if (signal?.aborted || !intent || !maySendTrain(intent)) {
+        this.jobBook = commitJobOnAdmission(this.jobBook, {
+          accepted: false,
+          error_code: "cancelled",
+        });
+        if (this.solveIntent?.jobId === jobId) {
+          this.solveIntent = noteSolveTerminal(this.solveIntent);
+        }
+        throw new EngineError(
+          signal?.aborted ? "aborted" : "cancelled before train",
+          0,
+          null,
+        );
+      }
       const body = (await ipcSolve({
         iterations,
-        accuracy,
-        time_limit,
+        accuracy:
+          typeof trainFields.accuracy === "number" ? trainFields.accuracy : undefined,
+        samples:
+          typeof trainFields.samples === "number" ? trainFields.samples : undefined,
+        time_limit:
+          typeof trainFields.time_limit === "number"
+            ? trainFields.time_limit
+            : undefined,
         jobId,
-      })) as {
-        accepted?: boolean;
-        running?: boolean;
-        solution_id?: number;
-        policy_revision?: number;
-        trained?: number;
-        terminal_reason?: string;
-        threads?: number;
-      };
+      })) as TrainAdmissionReply;
+      // Re-check latch after a Stop that raced the train write.
+      intent = this.solveIntent;
+      if (intent?.jobId === jobId && intent.cancelLatched) {
+        this.jobBook = commitJobOnAdmission(this.jobBook, {
+          accepted: false,
+          error_code: "cancelled",
+        });
+        this.solveIntent = noteSolveTerminal(intent);
+        throw new EngineError("cancelled before train", 0, null);
+      }
       // Host short-admits train (ZR-90/ZR-106); Study polls status for completion.
-      const admitted = body.accepted === true || body.running === true;
+      const admitted = this.commitTrainAdmission(jobId, body);
       return {
         running: admitted ? true : false,
-        job_id: jobId,
-        solution_id:
-          body.solution_id != null && body.solution_id > 0
-            ? `s${body.solution_id}`
-            : null,
+        job_id: admitted ? jobId : defaultStopJobId(this.jobBook) ?? jobId,
+        solution_id: hostedSolutionId(body.solution_id),
         policy_revision: body.policy_revision ?? 0,
         trained: admitted ? 0 : (body.trained ?? iterations),
         terminal_reason: admitted
@@ -325,7 +448,8 @@ export class EngineClient {
 
   async pause(jobId?: string): Promise<unknown> {
     if (isIpcTransport()) {
-      return ipcPause(jobId ?? this.lastJobId);
+      const id = this.cancelTargetJobId(jobId);
+      return ipcPause(id);
     }
     const { response, data } = await this.request(
       "POST",
@@ -339,15 +463,27 @@ export class EngineClient {
   /**
    * Stop a train/analysis job.
    * On IPC this maps to host `cancel` (cooperative stop at iteration boundary).
-   * Missing jobId uses the last minted Study train id (ZR-90).
+   * Default target is the admitted active id; during Build→Train the pending
+   * composite job id is latched + cancelled so train is not admitted.
    */
   async stop(jobId?: string): Promise<unknown> {
     if (isIpcTransport()) {
-      const id = jobId ?? this.lastJobId;
+      if (this.solveIntent) {
+        this.solveIntent = latchSolveCancel(this.solveIntent);
+      }
+      const id = this.cancelTargetJobId(jobId);
       if (!id) {
         throw new EngineError("no active study job to cancel", 400, null);
       }
-      return ipcCancel(id);
+      const reply = (await ipcCancel(id)) as {
+        cancelled?: boolean;
+        reason?: string | null;
+      };
+      this.lastCancelAck = interpretCancelReply(reply, this.solveIntent);
+      if (this.solveIntent?.cancelLatched) {
+        this.solveIntent = noteSolveTerminal(this.solveIntent);
+      }
+      return { ...reply, cancel_ack: this.lastCancelAck };
     }
     const { response, data } = await this.request(
       "POST",
@@ -360,38 +496,46 @@ export class EngineClient {
 
   async continueSolve(
     solutionId: string,
-    body: { iterations: number; time_limit?: number },
+    body: {
+      iterations: number;
+      time_limit?: number;
+      samples?: number;
+      accuracy?: number;
+    },
   ): Promise<unknown> {
     if (isIpcTransport()) {
       // Host has no dedicated `continue` op: resume training on the open
       // session via `solve` (begin_config would wipe the trainer / has_training).
-      // Mint a fresh job id (ZR-90); host rejects browse-only via has_training.
+      // Mint a fresh pending job id; promote only after admission.
       void solutionId;
-      const iterations = Math.max(1, Math.trunc(body.iterations || 1));
+      const trainFields = buildTrainRequestBody("continue", {
+        iterations: body.iterations,
+        samples: body.samples,
+        accuracy: body.accuracy,
+        time_limit: body.time_limit,
+      });
+      const iterations = trainFields.iterations as number;
       const jobId = mintStudyJobId();
-      this.lastJobId = jobId;
-      const time_limit =
-        typeof body.time_limit === "number" && Number.isFinite(body.time_limit)
-          ? body.time_limit
-          : undefined;
+      this.jobBook = beginPendingJob(this.jobBook, jobId);
+      this.solveIntent = null;
+      this.lastCancelAck = null;
       const reply = (await ipcSolve({
         iterations,
-        time_limit,
+        samples:
+          typeof trainFields.samples === "number" ? trainFields.samples : undefined,
+        accuracy:
+          typeof trainFields.accuracy === "number" ? trainFields.accuracy : undefined,
+        time_limit:
+          typeof trainFields.time_limit === "number"
+            ? trainFields.time_limit
+            : undefined,
         jobId,
         solutionId,
-      })) as {
-        accepted?: boolean;
-        running?: boolean;
-        solution_id?: number | string;
-        policy_revision?: number;
-        trained?: number;
-        terminal_reason?: string;
-        threads?: number;
-      };
-      const admitted = reply.accepted === true || reply.running === true;
+      })) as TrainAdmissionReply;
+      const admitted = this.commitTrainAdmission(jobId, reply);
       return {
         running: admitted ? true : false,
-        job_id: jobId,
+        job_id: admitted ? jobId : defaultStopJobId(this.jobBook) ?? jobId,
         solution_id: hostedSolutionId(reply.solution_id, solutionId),
         policy_revision: reply.policy_revision ?? 0,
         trained: admitted ? 0 : (reply.trained ?? iterations),
@@ -424,43 +568,36 @@ export class EngineClient {
     if (isIpcTransport()) {
       // Host resolve_locked: baseline stamp + optional reset + train under locks.
       void solutionId;
-      const iterations = Math.max(1, Math.trunc(body.iterations || 1));
+      const trainFields = buildTrainRequestBody("resolve_locked", {
+        iterations: body.iterations,
+        samples: body.samples,
+        accuracy: body.accuracy,
+        time_limit: body.time_limit,
+        warm_start: body.warm_start,
+      });
+      const iterations = trainFields.iterations as number;
       const jobId = mintStudyJobId();
-      this.lastJobId = jobId;
-      const time_limit =
-        typeof body.time_limit === "number" && Number.isFinite(body.time_limit)
-          ? body.time_limit
-          : undefined;
-      const accuracy =
-        typeof body.accuracy === "number" && Number.isFinite(body.accuracy)
-          ? body.accuracy
-          : undefined;
-      const samples =
-        typeof body.samples === "number" && Number.isFinite(body.samples)
-          ? body.samples
-          : undefined;
+      this.jobBook = beginPendingJob(this.jobBook, jobId);
+      this.solveIntent = null;
+      this.lastCancelAck = null;
       const reply = (await ipcResolveLocked({
         iterations,
         warm_start: body.warm_start ? 1 : 0,
-        accuracy,
-        samples,
-        time_limit,
+        accuracy:
+          typeof trainFields.accuracy === "number" ? trainFields.accuracy : undefined,
+        samples:
+          typeof trainFields.samples === "number" ? trainFields.samples : undefined,
+        time_limit:
+          typeof trainFields.time_limit === "number"
+            ? trainFields.time_limit
+            : undefined,
         jobId,
         solutionId,
-      })) as {
-        accepted?: boolean;
-        running?: boolean;
-        solution_id?: number | string;
-        baseline_solution_id?: number | string;
-        policy_revision?: number;
-        trained?: number;
-        terminal_reason?: string;
-        threads?: number;
-      };
-      const admitted = reply.accepted === true || reply.running === true;
+      })) as TrainAdmissionReply;
+      const admitted = this.commitTrainAdmission(jobId, reply);
       return {
         running: admitted ? true : false,
-        job_id: jobId,
+        job_id: admitted ? jobId : defaultStopJobId(this.jobBook) ?? jobId,
         solution_id: hostedSolutionId(reply.solution_id, solutionId),
         baseline_solution_id: hostedSolutionId(reply.baseline_solution_id),
         policy_revision: reply.policy_revision ?? 0,
@@ -544,9 +681,20 @@ export class EngineClient {
           : { nodeIndex: 0, nodeId: "p0.t-1.r-1", solutionId },
       )) as Record<string, unknown>;
       const served = hostedSolutionId(data.solution_id, solutionId);
+      // Host packs equity generation into `status_generation` with a different
+      // formula than status-path sequence — expose an explicit equity field and
+      // do not feed this into Study status ordering (getSeenGeneration).
+      const equityGeneration =
+        typeof data.status_generation === "number" &&
+        Number.isFinite(data.status_generation)
+          ? data.status_generation
+          : undefined;
       return {
         ...data,
         ...(served ? { solution_id: served } : {}),
+        ...(equityGeneration !== undefined
+          ? { equity_generation: equityGeneration }
+          : {}),
         node_id:
           typeof data.node_id === "string"
             ? data.node_id
@@ -736,7 +884,12 @@ export class EngineClient {
         throw new EngineError(err instanceof Error ? err.message : String(err), 0, null);
       }
       try {
-        return decodeStatusPayload(data);
+        // Successful replacement: drop job book and clear job-local targets /
+        // terminal errors while preserving checkpoint metadata on the payload.
+        this.clearLastStudyJobId();
+        return applyOpenJobLocalReset(
+          decodeStatusPayload(data) as StatusPayload & Record<string, unknown>,
+        ) as StatusPayload;
       } catch (err) {
         throw new EngineError(err instanceof Error ? err.message : String(err), 0, data);
       }
@@ -744,10 +897,17 @@ export class EngineClient {
     const { response, data } = await this.request("POST", "/api/open", { path }, { signal });
     this.ensureOk(response, data, true);
     if (response.status === 202) {
-      return this.waitUntilIdle(signal);
+      const idle = await this.waitUntilIdle(signal);
+      this.clearLastStudyJobId();
+      return applyOpenJobLocalReset(
+        idle as StatusPayload & Record<string, unknown>,
+      ) as StatusPayload;
     }
     try {
-      return decodeStatusPayload(data);
+      this.clearLastStudyJobId();
+      return applyOpenJobLocalReset(
+        decodeStatusPayload(data) as StatusPayload & Record<string, unknown>,
+      ) as StatusPayload;
     } catch (err) {
       throw new EngineError(
         err instanceof Error ? err.message : String(err),

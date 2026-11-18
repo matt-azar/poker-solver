@@ -644,6 +644,8 @@ export async function ipcPlanMemory(configText: string): Promise<unknown> {
 export type IpcSolveOptions = {
   iterations: number;
   accuracy?: number;
+  /** Evaluation cadence samples (Settings Samples) — forward when UI exposes it. */
+  samples?: number;
   time_limit?: number;
   eval_every?: number;
   jobId?: string | null;
@@ -663,6 +665,9 @@ export async function ipcSolve(
   };
   if (opts.accuracy != null && Number.isFinite(opts.accuracy) && opts.accuracy > 0) {
     body.accuracy = opts.accuracy;
+  }
+  if (opts.samples != null && Number.isFinite(opts.samples) && opts.samples > 0) {
+    body.samples = Math.trunc(opts.samples);
   }
   if (opts.time_limit != null && Number.isFinite(opts.time_limit) && opts.time_limit >= 0) {
     body.time_limit = opts.time_limit;

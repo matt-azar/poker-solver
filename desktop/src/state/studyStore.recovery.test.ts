@@ -79,6 +79,8 @@ const engineMocks = vi.hoisted(() => {
       save: vi.fn(async () => undefined),
       setBaseUrl: vi.fn(),
       clearLastStudyJobId: vi.fn(),
+      adoptPendingJobIfRunning: vi.fn(),
+      lastStopAck: vi.fn(() => null),
     },
   };
 });

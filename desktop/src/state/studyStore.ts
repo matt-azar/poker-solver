@@ -110,6 +110,7 @@ import {
   statusIndicatesFailure,
   statusStickyError,
 } from "../domain/sessionRecovery";
+import { applyOpenJobLocalReset } from "../domain/jobIntent";
 import {
   getActiveTransport,
   killSolverEngineIpc,
@@ -221,6 +222,7 @@ import {
 } from "./studySessionController";
 
 import {
+  accuracyFieldToEngine,
   phaseFromStatus,
   rootNodeId,
   buildJob,
@@ -797,6 +799,8 @@ async function recoverTrainRpcTimeout(
   try {
     const status = await engineClient.status();
     if (status.running || status.paused || status.solution_id) {
+      // Timeout after write: promote pending → active so Stop targets the live job.
+      engineClient.adoptPendingJobIfRunning(status);
       continuationPending = true;
       get().startPolling();
       await get().refresh();
@@ -2906,11 +2910,21 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     continuationPending = true;
     get().startPolling();
     try {
-      const body: { iterations: number; time_limit?: number } = {
+      const body: {
+        iterations: number;
+        time_limit?: number;
+        samples?: number;
+        accuracy?: number;
+      } = {
         iterations: get().draft.iterations,
+        samples: get().draft.samples,
       };
       if (get().draft.timeLimit.trim() !== "") {
         body.time_limit = Number(get().draft.timeLimit);
+      }
+      const accuracy = accuracyFieldToEngine(get().draft.accuracy);
+      if (Number.isFinite(accuracy) && accuracy > 0) {
+        body.accuracy = accuracy;
       }
       // ZR-169: re-stamp pre-solve snapshot before Continue train starts.
       let continueSummary = summarizeContinueSolve(null, {
@@ -3005,12 +3019,19 @@ export const useStudyStore = create<StudyState>((set, get) => ({
         iterations: number;
         warm_start: number;
         time_limit?: number;
+        samples?: number;
+        accuracy?: number;
       } = {
         iterations: get().draft.iterations,
         warm_start: get().warmStart ? 1 : 0,
+        samples: get().draft.samples,
       };
       if (get().draft.timeLimit.trim() !== "") {
         body.time_limit = Number(get().draft.timeLimit);
+      }
+      const accuracy = accuracyFieldToEngine(get().draft.accuracy);
+      if (Number.isFinite(accuracy) && accuracy > 0) {
+        body.accuracy = accuracy;
       }
       await engineClient.resolveLocked(solutionId, body);
       await get().refresh();
@@ -3066,7 +3087,34 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   async stop() {
     set({ phase: "stop_requested", message: "Stopping after the current sample…" });
     try {
-      await engineClient.stop();
+      const reply = (await engineClient.stop()) as {
+        cancelled?: boolean;
+        reason?: string | null;
+        cancel_ack?: {
+          kind?: string;
+          duringBuildHandoff?: boolean;
+        };
+      };
+      const ack =
+        reply?.cancel_ack ??
+        engineClient.lastStopAck?.() ??
+        null;
+      // Host may return not_running between Build and train; client latch still
+      // cancelled the composite intent — surface as an acknowledged noop.
+      if (ack?.kind === "noop_not_running" && ack.duringBuildHandoff) {
+        continuationPending = false;
+        set({
+          phase: "idle",
+          message: "Stopped before training started.",
+        });
+        return;
+      }
+      if (ack?.kind === "cancelled" || reply?.cancelled === true) {
+        set({
+          phase: "stop_requested",
+          message: "Stopping after the current sample…",
+        });
+      }
     } catch (error) {
       const fault = classifyEngineSessionFault(error);
       if (fault.sessionDead) {
@@ -3127,6 +3175,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       if (!shouldApply(token, getNodeToken(), node.solution_id ?? solutionId, get().solutionId)) {
         return;
       }
+      // Node replies may carry a status-path sequence — never compare equity
+      // generation here (equity uses a different host formula).
       if (typeof node.status_generation === "number" && node.status_generation < getSeenGeneration()) {
         return;
       }
@@ -4156,6 +4206,16 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     continuationPending = true;
     get().startPolling();
     await get().refresh();
+    // Host Status can still echo a prior job's iterations_requested / sticky
+    // errors after Open — force job-local clears; keep checkpoint metadata.
+    const statusRaw = get().status;
+    if (statusRaw) {
+      set({
+        status: applyOpenJobLocalReset(
+          statusRaw as typeof statusRaw & Record<string, unknown>,
+        ) as typeof statusRaw,
+      });
+    }
     // Replace Build draft wholesale from solution config + status — never merge
     // into the previous draft (avoids 22s over an AA solution, stale time limits).
     const status = get().status;
