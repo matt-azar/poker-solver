@@ -131,8 +131,15 @@ export function ComboInspector({ variant = "panel" }: ComboInspectorProps = {}) 
   }, [currentNode, focus]);
 
   const colors = useMemo(
-    () => mapActionColors(currentNode?.actions ?? []),
-    [currentNode?.actions],
+    () =>
+      mapActionColors(currentNode?.actions ?? [], {
+        pot: actionSizePotBasis(
+          currentNode,
+          Number(status?.pot ?? draft.pot ?? 0),
+        ),
+        toCall: Number(currentNode?.to_call ?? 0),
+      }),
+    [currentNode, status?.pot, draft.pot],
   );
 
   const equityMap = useMemo(() => {
@@ -187,12 +194,25 @@ export function ComboInspector({ variant = "panel" }: ComboInspectorProps = {}) 
   const overlay = displayPrefs.cellOverlay;
   const showEv = sheet || overlay === "ev" || overlay === "both";
   const showEq = !sheet && (overlay === "equity" || overlay === "both");
-  const showFreq = sheet || overlay === "none" || overlay === "equity";
+  // Combo frequency stays visible so it never confuses with range-wide Actions freq.
+  const showFreq = true;
   const shape = cell ? cellShape(cell.row, cell.col) : "pair";
   const cols = shapeColumns(shape);
-  // Action rows show EV or frequency; equity always has its own labeled row.
-  // Phone sheet shows both freq + EV in one compact value.
-  const metricLabel = sheet ? "Freq · EV" : showEv ? "EV" : "Freq";
+  const metricLabel = sheet || showEv ? "Freq · EV" : "Combo freq";
+
+  const rangeComposition = useMemo(() => {
+    if (!currentNode || focus) {
+      return null;
+    }
+    const cells = groupHands(currentNode).filter(
+      (entry) => entry.defined && entry.marginalSum > 0,
+    );
+    const mass = cells.reduce((sum, entry) => sum + entry.marginalSum, 0);
+    return {
+      hands: cells.length,
+      mass,
+    };
+  }, [currentNode, focus]);
 
   // Hands EV rows need /values; Study always-on warm usually provides them.
   // Retry only when a settled failure is left for this node.
@@ -239,7 +259,7 @@ export function ComboInspector({ variant = "panel" }: ComboInspectorProps = {}) 
   return (
     <section className="combo-inspector" aria-label="Hands">
       <div className="combo-inspector__head panel-title-row">
-        <h2 className="panel-title">Hands</h2>
+        <h2 className="panel-title">{focus ? "Hands" : "Range"}</h2>
         <span className="combo-inspector__focus tabular">
           {focus?.text ?? ""}
         </span>
@@ -247,7 +267,24 @@ export function ComboInspector({ variant = "panel" }: ComboInspectorProps = {}) 
           {pinned ? "Pinned" : focus ? "Hover" : ""}
         </span>
       </div>
-      {!currentNode || !cell ? null : (
+      {!currentNode ? null : !cell ? (
+        rangeComposition ? (
+          <div className="combo-inspector__body combo-inspector__range">
+            <div className="inspector-meta">
+              <div>
+                <span className="muted">Hands in range</span>
+                <strong className="tabular">{rangeComposition.hands}</strong>
+              </div>
+              <div>
+                <span className="muted">Mass</span>
+                <strong className="tabular">
+                  {rangeComposition.mass.toFixed(2)}
+                </strong>
+              </div>
+            </div>
+          </div>
+        ) : null
+      ) : (
         <>
           {nodeValues?.pending ? (
             <p className="muted">Calculating action EVs…</p>
@@ -341,18 +378,17 @@ export function ComboInspector({ variant = "panel" }: ComboInspectorProps = {}) 
                             { toCall },
                           );
                           const freq = freqByLabel.get(label) ?? 0;
-                          let valueText = "—";
-                          if (sheet) {
-                            const freqText =
-                              formatFrequencyPct(freq, 0) ?? "—";
-                            const evText = formatEvChip(
-                              actionEvs?.[index] ?? null,
-                            );
+                          const freqText = formatFrequencyPct(freq, 0) ?? "0%";
+                          let valueText = freqText;
+                          if (sheet || showEv) {
+                            const evRaw = actionEvs?.[index];
+                            const evText =
+                              nodeValues?.pending
+                                ? "…"
+                                : formatEvChip(evRaw ?? null);
                             valueText = `${freqText} · ${evText}`;
-                          } else if (showEv) {
-                            valueText = formatEvChip(actionEvs?.[index] ?? null);
-                          } else if (showFreq) {
-                            valueText = formatFrequencyPct(freq, 0) ?? "—";
+                          } else if (!showFreq) {
+                            valueText = "—";
                           }
                           return (
                             <div

@@ -111,10 +111,11 @@ describe("ComboInspector", () => {
     expect(metrics.some((el) => /% · /.test(el.textContent ?? ""))).toBe(true);
   });
 
-  it("shows Hands heading without instructional empty copy when nothing is focused", () => {
+  it("shows Range composition without instructional empty copy when nothing is focused", () => {
     useStudyStore.setState({ selectedCell: null, hoverCell: null });
     render(<ComboInspector />);
-    expect(screen.getByRole("heading", { name: "Hands" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Range" })).toBeTruthy();
+    expect(screen.getByText("Hands in range")).toBeTruthy();
     expect(screen.queryByText(/Hover a hand/i)).toBeNull();
     expect(screen.queryByText(/Solve a spot/i)).toBeNull();
   });
@@ -154,8 +155,8 @@ describe("ComboInspector", () => {
       expect(card.getAttribute("data-suit")).toMatch(/^[cdhs]$/);
       expect(card.hasAttribute("data-red")).toBe(false);
     }
-    expect(screen.getByText("0.5")).toBeTruthy();
-    expect(screen.getByText("2.5")).toBeTruthy();
+    expect(screen.getByText(/0\.5/)).toBeTruthy();
+    expect(screen.getByText(/2\.5/)).toBeTruthy();
     const present = document.querySelector(
       '.hands-combo[data-present="true"]',
     ) as HTMLElement;
@@ -163,10 +164,10 @@ describe("ComboInspector", () => {
       ...present.querySelectorAll(".hands-combo__weight-fill .strategy-paint__seg"),
     ] as HTMLElement[];
     expect(segs.length).toBeGreaterThan(0);
-    // Check (passive) is left-most; Bet (aggressive) is right (#C9843F → rgb).
-    expect(segs[0]?.style.background).not.toMatch(/201,\s*132,\s*63|#C9843F/i);
+    // Check (passive) is left-most; Bet 50% pot → palette index 2 (#B33A32).
+    expect(segs[0]?.style.background).toMatch(/63,\s*143,\s*107|#3F8F6B/i);
     expect(segs[segs.length - 1]?.style.background).toMatch(
-      /201,\s*132,\s*63|#C9843F/i,
+      /179,\s*58,\s*50|#B33A32/i,
     );
     expect(Number(segs[0]?.style.flexGrow)).toBeGreaterThan(0);
     // Metrics stay bottom-locked overlay — not painted onto segments.
@@ -376,7 +377,7 @@ describe("ComboInspector", () => {
     expect(screen.getByText("82.0")).toBeTruthy();
     expect(screen.getByText("71.0")).toBeTruthy();
     expect(screen.getByText("64.0")).toBeTruthy();
-    // Action metrics stay on frequency when overlay is equity-only.
-    expect(screen.getAllByText("Freq").length).toBeGreaterThan(0);
+    // Action metrics stay on combo frequency when overlay is equity-only.
+    expect(screen.getAllByText("Combo freq").length).toBeGreaterThan(0);
   });
 });

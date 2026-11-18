@@ -639,6 +639,21 @@
   white-space: nowrap;
 }
 
+.context-strip__value--actor {
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+
+.context-strip__group--line {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.context-strip__group--line .context-strip__value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Board card row in the context strip. */
 .context-strip__board {
   display: flex;
@@ -849,11 +864,9 @@
   cursor: ew-resize;
 }
 
-/* Right edge of the main 13×13. The open analysis dock overlays this column
-   (z-index 6) and must cover the split, so this handle stays underneath it.
-   RangeMatrix also insets `bottom` by the open dock height so the hit target
-   stops at the dock's top edge. A later one-class .resize-handle rule sets a
-   short ns-resize bar, so this selector has to win on height and cursor. */
+/* Right edge of the main 13×13. Dock is in-flow under the matrix, so the
+   handle spans the full matrix height. A later one-class .resize-handle rule
+   sets a short ns-resize bar, so this selector has to win on height and cursor. */
 .range-matrix-wrap > .resize-handle.resize-handle--vertical.range-matrix__resize {
   top: 0;
   bottom: 0;
@@ -1229,12 +1242,13 @@
   font-size: 12px;
 }
 
-/* Right Study rail: Actions summary + Hands inspector. */
+/* Right Study rail: Actions summary + Hands inspector.
+   Width is bound from layout.inspectorWidth in StudyDetailPanel. */
 .study-detail-panel {
-  flex: 1 1 0;
-  width: auto;
-  min-width: 360px;
-  max-width: none;
+  flex: 0 0 auto;
+  width: 320px;
+  min-width: 260px;
+  max-width: 420px;
   height: 100%;
   min-height: 0;
   display: flex;
@@ -1341,24 +1355,24 @@
   color: var(--muted);
 }
 
-/* Bottom analysis dock. Open dock overlays the range chart so the chart keeps
-   its size while the panel is dragged up over it. */
+/* Bottom analysis dock. Open dock stays in-flow under the matrix so Categories
+   cannot cover most of the 13×13 (true split, not an overlay). */
 .lower-dock {
   flex: 0 0 auto;
   height: var(--dock-h);
   min-height: 96px;
-  max-height: none;
+  max-height: 40vh;
   background: var(--panel);
   border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 6;
+  position: relative;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  z-index: 2;
   overflow: hidden;
-  box-shadow: 0 -10px 28px color-mix(in srgb, #000 28%, transparent);
+  box-shadow: none;
 }
 
 /* Tab strip for lower-dock panels. */
@@ -2870,8 +2884,9 @@
   border: 0;
 }
 
-/* Responsive overrides below 1100px width. */
-@media (max-width: 1100px) {
+/* Keep matrix + inspector side-by-side through 1100×800 (audit zero-height at 1100).
+   Stack only on narrower phone / tight Windows WebView widths. */
+@media (max-width: 980px) {
   /* Study center grid: optional nav + matrix pane. */
   .study-main {
     grid-template-columns: 1fr;
@@ -2881,10 +2896,10 @@
   .node-navigator,
   .study-detail-panel,
   .combo-inspector {
-    width: 100%;
-    max-width: none;
-    min-width: 0;
-    max-height: 220px;
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    max-height: min(240px, 32vh);
     border-left: 0;
     border-right: 0;
   }
@@ -2894,12 +2909,13 @@
     flex-direction: column;
   }
 
-  /* Outer box around the 13x13 hand matrix. */
+  /* Outer box around the 13x13 hand matrix — leave room for the inspector. */
   .range-matrix-wrap {
     aspect-ratio: auto;
     flex: 1 1 auto;
     width: 100%;
-    max-height: 55vh;
+    max-height: 48vh;
+    height: auto;
   }
 
   /* Two-column Build sections grid. */
@@ -4609,19 +4625,8 @@
 
 /* Responsive overrides below 1024px width. */
 @media (max-width: 1024px) {
-  /* Study center grid: optional nav + matrix pane. */
-  .study-main {
-    grid-template-columns: 1fr !important;
-  }
-
-  /* Right Study rail: Actions summary + Hands inspector. */
-  .study-detail-panel,
-  .combo-inspector {
-    max-height: 40vh;
-  }
-
   .lower-dock {
-    max-height: none;
+    max-height: 36vh;
   }
 }
 
