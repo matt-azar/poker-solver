@@ -25,6 +25,18 @@ const TrainTask = struct {
     accuracy: f64,
     time_limit: f64,
     eval_every: i32,
+    /// Resolve Locked: run `prepareResolveLocked` + short admit on the train
+    /// worker so the stdin loop stays free for Status/Stop (audit Track 2/4).
+    resolve_prepare: bool = false,
+    warm_start: bool = false,
+};
+
+const CompareTask = struct {
+    state: *HostState,
+    request_id: []u8,
+    job_id: ?[]u8,
+    op: []u8,
+    body_json: []u8,
 };
 
 const BeginTask = struct {
@@ -162,6 +174,10 @@ pub const HostState = struct {
     /// ZR-151: Save/Open off the stdin loop (large PSOL must not starve control).
     io_thread: ?std.Thread = null,
     io_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    /// Dual-session Compare off the stdin loop (does not bump analysis gen).
+    compare_thread: ?std.Thread = null,
+    compare_orphans: std.ArrayList(std.Thread),
+    compare_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     /// Persistent preview worker; queue depth 1 = latest draft only.
     preview_mu: std.Thread.Mutex = .{},
     preview_cv: std.Thread.Condition = .{},
@@ -202,6 +218,7 @@ pub const HostState = struct {
             .pending = std.ArrayList([]u8).init(allocator),
             .cancelled_jobs = std.StringHashMap(void).init(allocator),
             .analysis_queue = std.ArrayList(*AnalysisTask).init(allocator),
+            .compare_orphans = std.ArrayList(std.Thread).init(allocator),
             .equity_jobs = equity_jobs.Manager.init(allocator),
         };
     }
@@ -211,6 +228,7 @@ pub const HostState = struct {
         self.joinTrain();
         self.joinAnalysis();
         self.joinIo();
+        self.joinCompare();
         self.joinPreview();
         self.equity_jobs.deinit();
         self.clearPending();
@@ -228,6 +246,7 @@ pub const HostState = struct {
         self.clearLastError();
         self.pending.deinit();
         self.analysis_queue.deinit();
+        self.compare_orphans.deinit();
     }
 
     /// Clear sticky async-train error (fresh admit / successful train / teardown).
@@ -289,6 +308,30 @@ pub const HostState = struct {
         if (self.io_thread) |t| {
             t.join();
             self.io_thread = null;
+        }
+    }
+
+    pub fn joinCompare(self: *HostState) void {
+        if (self.compare_thread) |t| {
+            t.join();
+            self.compare_thread = null;
+        }
+        for (self.compare_orphans.items) |t| {
+            t.join();
+        }
+        self.compare_orphans.clearRetainingCapacity();
+    }
+
+    /// Park the prior Compare join handle without blocking the stdin loop.
+    pub fn retireCompareThread(self: *HostState) void {
+        if (self.compare_thread) |old_t| {
+            self.compare_orphans.ensureUnusedCapacity(1) catch {
+                old_t.join();
+                self.compare_thread = null;
+                return;
+            };
+            self.compare_orphans.appendAssumeCapacity(old_t);
+            self.compare_thread = null;
         }
     }
 
@@ -460,13 +503,34 @@ pub const HostState = struct {
         self.returnBudgetToTraining();
     }
 
+    /// Encode outside `stdout_mu` so Status/Stop packing is not blocked behind
+    /// multi-MiB analysis JSON (audit Track 2/4 bulk-reply measure).
     pub fn writeReply(self: *HostState, reply: ipc.Envelope) !void {
         // Unit-test binaries share stdout with the Zig 0.14 listen protocol.
         // Writing IPC frames there desyncs the runner and hangs `zig build test`.
         if (builtin.is_test) return;
+        const frame = ipc.encodeFrame(self.allocator, reply) catch |err| {
+            if (err != error.PayloadTooLarge) return err;
+            var refuse = try ipc.makeErrorReply(
+                self.allocator,
+                reply.request_id,
+                reply.job_id,
+                if (reply.op.len != 0) reply.op else "unknown",
+                "payload_too_large",
+                "response exceeds protocol-2 max payload (16 MiB)",
+            );
+            defer refuse.deinit();
+            const small = try ipc.encodeFrame(self.allocator, refuse);
+            defer self.allocator.free(small);
+            self.stdout_mu.lock();
+            defer self.stdout_mu.unlock();
+            std.io.getStdOut().writer().writeAll(small) catch return error.BrokenPipe;
+            return;
+        };
+        defer self.allocator.free(frame);
         self.stdout_mu.lock();
         defer self.stdout_mu.unlock();
-        try ipc.writeFrame(self.allocator, std.io.getStdOut().writer(), reply);
+        std.io.getStdOut().writer().writeAll(frame) catch return error.BrokenPipe;
     }
 
     pub fn clearPending(self: *HostState) void {
@@ -1869,6 +1933,91 @@ fn handleCompare(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
 }
 
+fn compareWorker(task: *CompareTask) void {
+    const state = task.state;
+    defer {
+        state.untrack(task.request_id);
+        state.compare_running.store(false, .release);
+        state.allocator.free(task.request_id);
+        if (task.job_id) |j| state.allocator.free(j);
+        state.allocator.free(task.op);
+        state.allocator.free(task.body_json);
+        state.allocator.destroy(task);
+    }
+
+    // Borrowed view — strings owned by the task until defer above.
+    const req_view = ipc.Envelope{
+        .allocator = state.allocator,
+        .kind = .request,
+        .request_id = task.request_id,
+        .job_id = task.job_id,
+        .op = task.op,
+        .body_json = task.body_json,
+    };
+    var reply = handleCompare(state, req_view) catch |err| blk: {
+        break :blk ipc.makeErrorReply(
+            state.allocator,
+            task.request_id,
+            task.job_id,
+            task.op,
+            "compare_failed",
+            @errorName(err),
+        ) catch return;
+    };
+    defer reply.deinit();
+    state.writeReply(reply) catch {};
+}
+
+/// Product stdin path: Compare off the control loop so Status/Stop stay live.
+/// Does not bump analysis gen (node/values/equity must not be superseded).
+pub fn startCompare(state: *HostState, req: ipc.Envelope) !void {
+    try state.track(req.request_id);
+    errdefer state.untrack(req.request_id);
+
+    if (try rejectStaleLaunch(state, req)) |err_reply| {
+        var owned = err_reply;
+        defer owned.deinit();
+        state.untrack(req.request_id);
+        try state.writeReply(owned);
+        return;
+    }
+
+    const request_id = try state.allocator.dupe(u8, req.request_id);
+    errdefer state.allocator.free(request_id);
+    const job_id: ?[]u8 = if (req.job_id) |j| try state.allocator.dupe(u8, j) else null;
+    errdefer if (job_id) |j| state.allocator.free(j);
+    const op = try state.allocator.dupe(u8, req.op);
+    errdefer state.allocator.free(op);
+    const body_json = try state.allocator.dupe(u8, req.body_json);
+    errdefer state.allocator.free(body_json);
+
+    const task = try state.allocator.create(CompareTask);
+    errdefer state.allocator.destroy(task);
+    task.* = .{
+        .state = state,
+        .request_id = request_id,
+        .job_id = job_id,
+        .op = op,
+        .body_json = body_json,
+    };
+
+    state.retireCompareThread();
+    state.compare_running.store(true, .release);
+    state.compare_thread = std.Thread.spawn(.{}, compareWorker, .{task}) catch |err| {
+        state.compare_running.store(false, .release);
+        state.allocator.free(task.request_id);
+        if (task.job_id) |j| state.allocator.free(j);
+        state.allocator.free(task.op);
+        state.allocator.free(task.body_json);
+        state.allocator.destroy(task);
+        state.untrack(req.request_id);
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
+        defer err_reply.deinit();
+        try state.writeReply(err_reply);
+        return;
+    };
+}
+
 fn resolveLocatedNode(
     game: poker_engine.game.CompiledGame,
     body_json: []const u8,
@@ -2377,8 +2526,8 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         return handleCategories(state, req);
     }
 
-    // Dual-session Compare (baseline vs scenario). Sync — does not bump analysis gen
-    // so Study node/values/equity are not superseded by a Compare workspace refresh.
+    // Dual-session Compare (baseline vs scenario). Sync path for unit tests.
+    // Product stdin uses startCompare (off-loop; does not bump analysis gen).
     if (std.mem.eql(u8, req.op, "compare")) {
         return handleCompare(state, req);
     }
@@ -2516,9 +2665,37 @@ fn trainWorker(task: *TrainTask) void {
         state.allocator.destroy(task);
     }
 
+    // Resolve Locked: baseline stamp / optional reset + short admit run here so
+    // Status/Stop can be read on stdin during preparation (audit Track 2/4).
+    if (task.resolve_prepare) {
+        state.session.prepareResolveLocked(task.warm_start) catch |err| {
+            const code: []const u8 = switch (err) {
+                error.Busy => "busy",
+                error.NothingPublished => "nothing_published",
+                error.InvalidSession => "cannot_continue",
+                else => "resolve_locked_failed",
+            };
+            var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, code, @errorName(err)) catch return;
+            defer err_reply.deinit();
+            state.writeReply(err_reply) catch {};
+            return;
+        };
+        var buf: [256]u8 = undefined;
+        const body = formatTrainAdmitBody(
+            &buf,
+            state.session.solution_id,
+            state.session.threads,
+            state.session.baseline_id,
+        ) catch return;
+        var reply = ipc.makeReply(state.allocator, task.request_id, task.job_id, task.op, body) catch return;
+        defer reply.deinit();
+        state.writeReply(reply) catch {};
+    }
+
     // ZR-171: always use trainGated so Study footer gets Acc/EV/ETA samples even
     // for iteration-only jobs (accuracy ≤ 0). Accuracy/time early-stop still honor
-    // positive targets. Admission already replied (ZR-106); faults → sticky last_error.
+    // positive targets. Ordinary solve admits on the stdin path (ZR-106); resolve
+    // admits above. Faults → sticky last_error.
     state.session.trainGated(task.iterations, task.accuracy, task.eval_every, task.time_limit) catch |err| {
         state.setLastError(@errorName(err));
         return;
@@ -2597,7 +2774,11 @@ fn admitTrainJob(state: *HostState, req: ipc.Envelope) !enum { ok, replied } {
     return .ok;
 }
 
-fn spawnTrainWorker(state: *HostState, req: ipc.Envelope) !enum { ok, replied } {
+fn spawnTrainWorker(
+    state: *HostState,
+    req: ipc.Envelope,
+    opts: struct { resolve_prepare: bool = false, warm_start: bool = false },
+) !enum { ok, replied } {
     const iterations = bodyIntField(req.body_json, "iterations") orelse 1;
     const accuracy = bodyFloatField(req.body_json, "accuracy") orelse 0;
     const time_limit = bodyFloatField(req.body_json, "time_limit") orelse -1;
@@ -2659,6 +2840,8 @@ fn spawnTrainWorker(state: *HostState, req: ipc.Envelope) !enum { ok, replied } 
             .accuracy = accuracy,
             .time_limit = time_limit,
             .eval_every = eval_every,
+            .resolve_prepare = opts.resolve_prepare,
+            .warm_start = opts.warm_start,
         };
         break :blk created;
     };
@@ -2847,13 +3030,14 @@ pub fn startSolve(state: *HostState, req: ipc.Envelope) !void {
         },
         .ok => {},
     }
-    switch (try spawnTrainWorker(state, req)) {
+    switch (try spawnTrainWorker(state, req, .{})) {
         .replied => return,
         .ok => try writeTrainAdmitReply(state, req),
     }
 }
 
 /// Study Resolve Locked: stamp baseline, mint new solution id, optional reset, then train under locks.
+/// Preparation + short admit run on the train worker so Status/Stop stay readable on stdin.
 pub fn startResolveLocked(state: *HostState, req: ipc.Envelope) !void {
     try state.track(req.request_id);
     errdefer state.untrack(req.request_id);
@@ -2883,23 +3067,10 @@ pub fn startResolveLocked(state: *HostState, req: ipc.Envelope) !void {
     }
 
     const warm_start = (bodyIntField(req.body_json, "warm_start") orelse 0) != 0;
-    state.session.prepareResolveLocked(warm_start) catch |err| {
-        const code: []const u8 = switch (err) {
-            error.Busy => "busy",
-            error.NothingPublished => "nothing_published",
-            error.InvalidSession => "cannot_continue",
-            else => "resolve_locked_failed",
-        };
-        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, code, @errorName(err));
-        defer err_reply.deinit();
-        state.untrack(req.request_id);
-        try state.writeReply(err_reply);
-        return;
-    };
-
-    switch (try spawnTrainWorker(state, req)) {
+    // Admit reply is written by trainWorker after prepareResolveLocked.
+    switch (try spawnTrainWorker(state, req, .{ .resolve_prepare = true, .warm_start = warm_start })) {
         .replied => return,
-        .ok => try writeTrainAdmitReply(state, req),
+        .ok => {},
     }
 }
 

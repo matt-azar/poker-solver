@@ -119,6 +119,7 @@ pub fn shutdownOnParentEof(state: *dispatch.HostState) void {
     state.joinBegin();
     state.joinTrain();
     state.joinAnalysis();
+    state.joinCompare();
     state.joinPreview();
 }
 
@@ -206,6 +207,15 @@ pub fn main() !void {
         }
         if (std.mem.eql(u8, req.op, "resolve_locked")) {
             dispatch.startResolveLocked(&state, req) catch |err| {
+                var fail = try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
+                defer fail.deinit();
+                try state.writeReply(fail);
+            };
+            continue;
+        }
+        // Compare off stdin so Status is not blocked behind dual inspect + pack.
+        if (std.mem.eql(u8, req.op, "compare")) {
+            dispatch.startCompare(&state, req) catch |err| {
                 var fail = try ipc.makeErrorReply(allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
                 defer fail.deinit();
                 try state.writeReply(fail);
@@ -509,6 +519,7 @@ test "parent EOF shuts down equity jobs and joins idle workers" {
     // Persistent analysis/preview pools are joined and cleared on EOF.
     try std.testing.expect(state.analysis_worker == null);
     try std.testing.expect(state.preview_worker == null);
+    try std.testing.expect(state.compare_thread == null);
     try std.testing.expectEqual(@as(u32, 0), state.analysis_live_workers.load(.acquire));
     try std.testing.expectEqual(@as(u32, 0), state.preview_live_workers.load(.acquire));
 }
