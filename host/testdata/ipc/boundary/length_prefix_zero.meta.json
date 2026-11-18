@@ -1,0 +1,5 @@
+{
+  "description": "LE u32 length prefix of 0 \u2014 invalid on host and desktop",
+  "claimed_payload_len": 0,
+  "expect": "reject as InvalidFrame"
+}

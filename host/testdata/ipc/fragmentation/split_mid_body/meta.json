@@ -1,0 +1,18 @@
+{
+  "description": "Body arrives in two chunks roughly mid-payload",
+  "cuts": [
+    52
+  ],
+  "frame_file": "../complete.request.frame",
+  "frame_len": 101,
+  "payload_len": 97,
+  "chunk_files": [
+    "chunk0.bin",
+    "chunk1.bin"
+  ],
+  "chunk_lengths": [
+    52,
+    49
+  ],
+  "reassembly": "concat(chunk*) == complete.request.frame"
+}

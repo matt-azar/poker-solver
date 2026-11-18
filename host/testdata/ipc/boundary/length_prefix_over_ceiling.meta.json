@@ -1,0 +1,6 @@
+{
+  "description": "LE u32 length prefix alone claiming payload_len = ceiling+1; no body follows in this fixture",
+  "claimed_payload_len": 16777217,
+  "assumed_ceiling_bytes": 16777216,
+  "expect": "reject as InvalidFrame / BadFrame before reading body"
+}

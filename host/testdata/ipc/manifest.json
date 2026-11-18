@@ -1,0 +1,91 @@
+{
+  "protocol": 2,
+  "audit": "2026-11-18",
+  "section": "6 / Single prompt §5",
+  "assumed_ceiling_bytes": 16777216,
+  "wire": "le_u32_length_plus_utf8_json",
+  "cases": [
+    {
+      "id": "node_select_compact_vs_spaced",
+      "dir": "node_select",
+      "intent": "identical semantic node_id p1.t-1.r-1 under compact and spaced JSON",
+      "files": [
+        "compact.body.json",
+        "spaced.body.json",
+        "compact.request.json",
+        "compact.request.frame",
+        "spaced_body.request.json",
+        "spaced_body.request.frame",
+        "spaced_envelope.request.json",
+        "spaced_envelope.request.frame"
+      ]
+    },
+    {
+      "id": "unicode_checkpoint_filename",
+      "dir": "unicode_checkpoint",
+      "intent": "Turn-🂡.psol via raw UTF-8 and JSON surrogate-pair escapes",
+      "expected_filename_file": "expected_filename.txt",
+      "files": [
+        "expected_filename.txt",
+        "raw_utf8.body.json",
+        "surrogate_pair.body.json",
+        "surrogate_pair_spaced.body.json",
+        "raw_utf8.request.json",
+        "raw_utf8.request.frame",
+        "surrogate_pair.request.json",
+        "surrogate_pair.request.frame"
+      ]
+    },
+    {
+      "id": "ordinary_frame_fragmentation",
+      "dir": "fragmentation",
+      "intent": "short-read splits across length prefix and body boundaries",
+      "files": [
+        "complete.request.json",
+        "complete.request.frame",
+        "two_frames_back_to_back.bin",
+        "two_frames_back_to_back.meta.json",
+        "split_mid_length_prefix/meta.json",
+        "split_after_length_prefix/meta.json",
+        "split_header_body_boundary/meta.json",
+        "split_mid_body/meta.json",
+        "split_three_chunks/meta.json"
+      ]
+    },
+    {
+      "id": "malformed_final_replies",
+      "dir": "malformed_reply",
+      "intent": "missing op / ok / job echo — consumers must reject",
+      "files": [
+        "valid_baseline.reply.json",
+        "valid_baseline.reply.frame",
+        "missing_op.reply.json",
+        "missing_op.reply.frame",
+        "missing_op.meta.json",
+        "missing_ok.reply.json",
+        "missing_ok.reply.frame",
+        "missing_ok.meta.json",
+        "missing_job_echo.reply.json",
+        "missing_job_echo.reply.frame",
+        "missing_job_echo.meta.json"
+      ]
+    },
+    {
+      "id": "boundary_payload_sizes",
+      "dir": "boundary",
+      "intent": "sizes near assumed 16 MiB ceiling; synthesize large payloads in tests",
+      "files": [
+        "CEILING.txt",
+        "tiny_valid.request.json",
+        "tiny_valid.request.frame",
+        "length_prefix_over_ceiling.bin",
+        "length_prefix_over_ceiling.meta.json",
+        "length_prefix_zero.bin",
+        "length_prefix_zero.meta.json",
+        "exactly_ceiling.meta.json",
+        "just_under_ceiling.meta.json",
+        "just_over_ceiling.meta.json"
+      ]
+    }
+  ]
+}

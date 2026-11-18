@@ -1,0 +1,8 @@
+{
+  "reject": true,
+  "reason": "Request carried job_id=job-42 but reply omits job_id; consumers must reject once contract hardens",
+  "expected_request_id": "r-job-1",
+  "expected_op": "status",
+  "expected_job_id": "job-42",
+  "defect": "missing_job_echo"
+}

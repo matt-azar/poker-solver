@@ -1,0 +1,8 @@
+{
+  "reject": true,
+  "reason": "Final reply omits boolean ok; consumers must reject (audit \u00a76)",
+  "expected_request_id": "r-job-1",
+  "expected_op": "status",
+  "expected_job_id": "job-42",
+  "defect": "missing_ok"
+}
