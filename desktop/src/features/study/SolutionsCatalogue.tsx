@@ -165,11 +165,13 @@ export function SolutionsCatalogue({ mode, onClose }: SolutionsCatalogueProps) {
   const catalogue = getSolutionsCatalogue();
   const solutionId = useStudyStore((s) => s.solutionId);
   const status = useStudyStore((s) => s.status);
+  const connection = useStudyStore((s) => s.connection);
   const saveSolution = useStudyStore((s) => s.saveSolution);
   const openSolution = useStudyStore((s) => s.openSolution);
   const updateDraft = useStudyStore((s) => s.updateDraft);
   const loadRecent = useStudyStore((s) => s.loadRecent);
   const canSaveCheckpoint = trainerContinueFromStatus(status) === true;
+  const engineNeeded = connection === "disconnected";
 
   const [revision, setRevision] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -449,20 +451,22 @@ export function SolutionsCatalogue({ mode, onClose }: SolutionsCatalogueProps) {
                   </span>
                 </span>
                 <div className="seat-tree__row-actions">
-                  <button
-                    type="button"
-                    className="toolbar-btn"
-                    title="Save into this folder"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      setSaveFolder(node.folder);
-                      setHighlightSave(true);
-                      setError(null);
-                    }}
-                  >
-                    Save here
-                  </button>
+                  {mode === "save" ? (
+                    <button
+                      type="button"
+                      className="toolbar-btn"
+                      title="Save into this folder"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setSaveFolder(node.folder);
+                        setHighlightSave(true);
+                        setError(null);
+                      }}
+                    >
+                      Save here
+                    </button>
+                  ) : null}
                   {node.folder !== UNFILED_FOLDER ? (
                     <RowMenu
                       label={node.name}
@@ -502,9 +506,11 @@ export function SolutionsCatalogue({ mode, onClose }: SolutionsCatalogueProps) {
             <button
               type="button"
               className="seat-tree__row-main seat-tree__open"
-              disabled={busy}
+              disabled={busy || engineNeeded}
               onClick={() => void openEntry(node.entry)}
-              title={node.entry.path}
+              title={
+                engineNeeded ? "Reconnect to open" : node.entry.path
+              }
             >
               <span className="seat-tree__twist seat-tree__twist--leaf" aria-hidden="true" />
               <FileIcon />
@@ -514,7 +520,8 @@ export function SolutionsCatalogue({ mode, onClose }: SolutionsCatalogueProps) {
               <button
                 type="button"
                 className="toolbar-btn primary"
-                disabled={busy}
+                disabled={busy || engineNeeded}
+                title={engineNeeded ? "Reconnect to open" : undefined}
                 onClick={() => void openEntry(node.entry)}
               >
                 Open
@@ -536,33 +543,46 @@ export function SolutionsCatalogue({ mode, onClose }: SolutionsCatalogueProps) {
     });
 
   return (
-    <div className="tree-catalogue solutions-catalogue" aria-label="Solutions catalogue">
-      <section className="seat-tree__toolbar" aria-label="Catalogue folders">
-        <div className="seat-tree__save-form">
-          <label>
-            New folder
-            <input
-              value={newFolder}
-              placeholder={
-                saveFolder ? `under ${saveFolder} (e.g. 100bb)` : "e.g. SRP"
-              }
-              onChange={(event) => {
-                setNewFolder(event.target.value);
-                setError(null);
-              }}
-              aria-label="New folder name"
-            />
-          </label>
-          <button type="button" className="toolbar-btn" onClick={addFolder}>
-            Add folder
-          </button>
-        </div>
-      </section>
+    <div
+      className="tree-catalogue solutions-catalogue"
+      aria-label={mode === "save" ? "Save solution" : "Open solution"}
+      data-mode={mode}
+    >
+      {mode === "save" ? (
+        <section className="seat-tree__toolbar" aria-label="Catalogue folders">
+          <div className="seat-tree__save-form">
+            <label>
+              New folder
+              <input
+                value={newFolder}
+                placeholder={
+                  saveFolder ? `under ${saveFolder} (e.g. 100bb)` : "e.g. SRP"
+                }
+                onChange={(event) => {
+                  setNewFolder(event.target.value);
+                  setError(null);
+                }}
+                aria-label="New folder name"
+              />
+            </label>
+            <button type="button" className="toolbar-btn" onClick={addFolder}>
+              Add folder
+            </button>
+          </div>
+        </section>
+      ) : null}
 
       <div className="seat-tree__browser" aria-label="Saved solutions">
         <div className="seat-tree__browser-head">
-          <h3 className="seat-tree__section-title">Saved solutions</h3>
+          <h3 className="seat-tree__section-title">
+            {mode === "open" ? "Find a solution" : "Saved solutions"}
+          </h3>
         </div>
+        {engineNeeded ? (
+          <p className="empty-hint" role="status">
+            Browsing local catalogue. Open and Save need a reconnect.
+          </p>
+        ) : null}
         {tree.length === 0 ? (
           <p className="empty-hint">No saved solutions yet.</p>
         ) : (
@@ -570,71 +590,79 @@ export function SolutionsCatalogue({ mode, onClose }: SolutionsCatalogueProps) {
         )}
       </div>
 
-      <section
-        className={
-          highlightSave || mode === "save"
-            ? "tree-catalogue__save tree-catalogue__save--focus"
-            : "tree-catalogue__save"
-        }
-        aria-label="Save current solution"
-      >
-        <h3 className="tree-catalogue__title">Save current solution</h3>
-        <div className="tree-catalogue__save-form">
-          <label>
-            Folder
-            <select
-              value={saveFolder}
-              onChange={(event) => setSaveFolder(event.target.value)}
-              aria-label="Folder for saved solution"
-            >
-              <option value={UNFILED_FOLDER}>Unfiled</option>
-              {folders.map((folder) => (
-                <option key={folder} value={folder}>
-                  {folder}
+      {mode === "save" ? (
+        <section
+          className={
+            highlightSave
+              ? "tree-catalogue__save tree-catalogue__save--focus"
+              : "tree-catalogue__save"
+          }
+          aria-label="Save current solution"
+        >
+          <h3 className="tree-catalogue__title">Save current solution</h3>
+          <div className="tree-catalogue__save-form">
+            <label>
+              Folder
+              <select
+                value={saveFolder}
+                onChange={(event) => setSaveFolder(event.target.value)}
+                aria-label="Folder for saved solution"
+              >
+                <option value={UNFILED_FOLDER}>Unfiled</option>
+                {folders.map((folder) => (
+                  <option key={folder} value={folder}>
+                    {folder}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Name
+              <input
+                value={saveName}
+                placeholder="e.g. SRP flop probe"
+                onChange={(event) => {
+                  setSaveName(event.target.value);
+                  setError(null);
+                }}
+                aria-label="Name for saved solution"
+                autoFocus
+              />
+            </label>
+            <label>
+              Mode
+              <select
+                value={saveKind}
+                onChange={(event) => {
+                  setSaveKind(event.target.value as CatalogueSaveKind);
+                  setError(null);
+                }}
+                aria-label="Save mode"
+              >
+                <option value="study">Study only</option>
+                <option value="checkpoint" disabled={!canSaveCheckpoint}>
+                  Resumable checkpoint
                 </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Name
-            <input
-              value={saveName}
-              placeholder="e.g. SRP flop probe"
-              onChange={(event) => {
-                setSaveName(event.target.value);
-                setError(null);
-              }}
-              aria-label="Name for saved solution"
-              autoFocus={mode === "save"}
-            />
-          </label>
-          <label>
-            Mode
-            <select
-              value={saveKind}
-              onChange={(event) => {
-                setSaveKind(event.target.value as CatalogueSaveKind);
-                setError(null);
-              }}
-              aria-label="Save mode"
+              </select>
+            </label>
+            <button
+              type="button"
+              className="toolbar-btn primary"
+              disabled={busy || !solutionId || engineNeeded}
+              title={
+                engineNeeded
+                  ? "Reconnect to save"
+                  : !solutionId
+                    ? "Solve or open a solution first"
+                    : undefined
+              }
+              onClick={() => void commitSave()}
             >
-              <option value="study">Study</option>
-              <option value="checkpoint" disabled={!canSaveCheckpoint}>
-                Continue
-              </option>
-            </select>
-          </label>
-          <button
-            type="button"
-            className="toolbar-btn primary"
-            disabled={busy || !solutionId}
-            title={!solutionId ? "Solve or open a solution first" : undefined}
-            onClick={() => void commitSave()}
-          >
-            {busy ? "Saving…" : "Save"}
-          </button>
-        </div>
-      </section>
+              {busy ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </section>
+      ) : null}
 
       {error ? (
         <p className="tree-catalogue__error" role="alert">
@@ -646,7 +674,8 @@ export function SolutionsCatalogue({ mode, onClose }: SolutionsCatalogueProps) {
         <button
           type="button"
           className="toolbar-btn"
-          disabled={busy}
+          disabled={busy || engineNeeded}
+          title={engineNeeded ? "Reconnect for disk browse" : undefined}
           onClick={() =>
             void (mode === "save" ? browseDiskSave() : browseDiskOpen())
           }

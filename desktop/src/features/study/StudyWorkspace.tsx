@@ -19,11 +19,25 @@ import { MatrixFilterChip } from "../matrix/MatrixFilterChip";
 import { OpponentRangePanel } from "../matrix/OpponentRangePanel";
 import { RangeMatrix } from "../matrix/RangeMatrix";
 import { StudyDetailPanel } from "../matrix/StudyDetailPanel";
+import { StartupEmptyState } from "../shell/StartupEmptyState";
 import { StrategyEditDrawer } from "../strategy/StrategyEditDrawer";
 import type { MatrixMode } from "../../domain/types";
 import { useStudyStore } from "../../state/studyStore";
 import { ActionHistory } from "./ActionHistory";
 import { ContextStrip } from "./ContextStrip";
+
+/** Phases that still need Study chrome even without a published solution id. */
+function studyBusyWithoutSolution(phase: string): boolean {
+  return (
+    phase === "building" ||
+    phase === "solving" ||
+    phase === "pause_requested" ||
+    phase === "stop_requested" ||
+    phase === "paused" ||
+    phase === "loading" ||
+    phase === "saving"
+  );
+}
 
 /** Keep EV + equity warm for every decision node without a manual Calculate click. */
 function AlwaysOnNodeAnalysis() {
@@ -109,10 +123,23 @@ function MatrixModeToolbar() {
 }
 
 export function StudyWorkspace() {
+  const solutionId = useStudyStore((s) => s.solutionId);
+  const phase = useStudyStore((s) => s.phase);
   const dualRange = useStudyStore((s) => s.layout.dualRange);
   const lockDrawerOpen = useStudyStore((s) => s.lockDrawerOpen);
   const strategyEditDrawerOpen = useStudyStore((s) => s.strategyEditDrawerOpen);
   const phoneDemo = usePhoneDemoLayout();
+
+  if (!solutionId && !studyBusyWithoutSolution(phase)) {
+    return (
+      <div
+        className="study-workspace study-workspace--empty"
+        data-phone-demo={phoneDemo ? "true" : "false"}
+      >
+        <StartupEmptyState />
+      </div>
+    );
+  }
 
   return (
     <div
