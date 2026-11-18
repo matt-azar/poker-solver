@@ -1932,6 +1932,11 @@ pub const Session = struct {
             if (self.training) |state| {
                 doc.trained = state.trained;
             }
+            // Mark ICM-aware trainer tables so Open can refuse Continue on
+            // pre-fix chip-trained ICM checkpoints (fresh solve required).
+            if (game.icm_stacks.len != 0) {
+                doc.icm_modeled_train = true;
+            }
         }
         if (self.locks_text.len != 0) {
             doc.locks_text = self.allocator.dupe(u8, self.locks_text) catch return error.OutOfMemory;
@@ -2113,7 +2118,10 @@ pub const Session = struct {
         // Reject invalid strategy rows before replacing the active solution (ZR-96).
         if (!validateAveragePolicy(game, average_mem)) return error.InvalidStrategy;
 
-        const want_training = doc.hasTraining();
+        // Pre-fix ICM saves trained chip EV into regret/strategy_sum. Continuing
+        // would mix chip and payout objectives — browse only; require a fresh solve.
+        const icm_resume_ok = game.icm_stacks.len == 0 or doc.icm_modeled_train;
+        const want_training = doc.hasTraining() and icm_resume_ok;
         var training: ?poker_engine.solve.training_state.TrainingState = null;
         errdefer if (training) |*owned| owned.deinit();
         if (want_training) {

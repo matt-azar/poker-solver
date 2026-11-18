@@ -288,6 +288,111 @@ test "study-only save on flop omits trainer tables and disables Continue" {
     try std.testing.expect(opened.published != null);
 }
 
+test "ICM checkpoint Continue requires modeled-train flag; cash unaffected" {
+    const icm_text =
+        \\street-config 1
+        \\board Tc 8d 5c 2h 2s
+        \\pot 100
+        \\stack 100
+        \\oop-range AhKh:1
+        \\ip-range QcQs:1,JcJd:1
+        \\ip-river-bets 1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\icm-stacks 150 9820 30
+        \\icm-payouts 50 50 0
+        \\memory-mib 64
+        \\threads 1
+        \\
+    ;
+    const cash_text =
+        \\street-config 1
+        \\board Ah Kd 7c 4s 2h
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1
+        \\ip-range KsKc:1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 64
+        \\threads 1
+        \\
+    ;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const icm_path = try std.fs.path.join(std.testing.allocator, &.{ abs, "icm.psol" });
+    defer std.testing.allocator.free(icm_path);
+    const cash_path = try std.fs.path.join(std.testing.allocator, &.{ abs, "cash.psol" });
+    defer std.testing.allocator.free(cash_path);
+    const legacy_path = try std.fs.path.join(std.testing.allocator, &.{ abs, "icm-legacy.psol" });
+    defer std.testing.allocator.free(legacy_path);
+
+    {
+        var sess = try Session.init(std.testing.allocator);
+        defer sess.deinit();
+        try sess.begin(icm_text);
+        try sess.train(1);
+        try sess.save(icm_path);
+        var doc = try poker_formats.readFile(std.testing.allocator, icm_path);
+        defer doc.deinit();
+        try std.testing.expect(doc.hasTraining());
+        try std.testing.expect(doc.icm_modeled_train);
+
+        var opened = try Session.init(std.testing.allocator);
+        defer opened.deinit();
+        try opened.open(icm_path);
+        try std.testing.expect(opened.has_training);
+        try std.testing.expect(opened.canContinue());
+    }
+
+    {
+        // Simulate a pre-fix ICM save: training tables present, flag cleared.
+        var doc = try poker_formats.readFile(std.testing.allocator, icm_path);
+        defer doc.deinit();
+        doc.icm_modeled_train = false;
+        try poker_formats.writeFile(std.testing.allocator, legacy_path, doc);
+
+        var opened = try Session.init(std.testing.allocator);
+        defer opened.deinit();
+        try opened.open(legacy_path);
+        try std.testing.expect(opened.published != null);
+        try std.testing.expect(!opened.has_training);
+        try std.testing.expect(opened.training == null);
+        try std.testing.expect(!opened.canContinue());
+    }
+
+    {
+        var sess = try Session.init(std.testing.allocator);
+        defer sess.deinit();
+        try sess.begin(cash_text);
+        try sess.train(1);
+        try sess.save(cash_path);
+        var doc = try poker_formats.readFile(std.testing.allocator, cash_path);
+        defer doc.deinit();
+        try std.testing.expect(doc.hasTraining());
+        try std.testing.expect(!doc.icm_modeled_train);
+
+        var opened = try Session.init(std.testing.allocator);
+        defer opened.deinit();
+        try opened.open(cash_path);
+        try std.testing.expect(opened.has_training);
+        try std.testing.expect(opened.canContinue());
+    }
+}
+
 test "train recovers from sticky failed phase without re-begin" {
     const text =
         \\street-config 1

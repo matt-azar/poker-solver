@@ -42,6 +42,7 @@ test "icm three-player Malmuth-Harville pin" {
 }
 
 test "icm zero-stack seat eliminated" {
+    // Only two paid places: busted seat finishes 3rd unpaid → 0.
     const stacks = [_]f64{ 1000, 0, 1000 };
     const payouts = [_]f64{ 80, 20 };
     const eq = try icm.icmEquities(std.testing.allocator, &stacks, &payouts);
@@ -49,6 +50,18 @@ test "icm zero-stack seat eliminated" {
     try std.testing.expectApproxEqAbs(@as(f64, 50.0), eq[0], 1e-12);
     try std.testing.expectApproxEqAbs(@as(f64, 0.0), eq[1], 1e-12);
     try std.testing.expectApproxEqAbs(@as(f64, 50.0), eq[2], 1e-12);
+}
+
+test "icm busted seat receives paid last place" {
+    // Three paid places: zero stack has already finished 3rd → payouts[2].
+    const stacks = [_]f64{ 0, 1650, 8350 };
+    const payouts = [_]f64{ 50, 30, 20 };
+    const eq = try icm.icmEquities(std.testing.allocator, &stacks, &payouts);
+    defer std.testing.allocator.free(eq);
+    try std.testing.expectApproxEqAbs(@as(f64, 20.0), eq[0], 1e-12);
+    try std.testing.expectApproxEqAbs(@as(f64, 33.3), eq[1], 1e-9);
+    try std.testing.expectApproxEqAbs(@as(f64, 46.7), eq[2], 1e-9);
+    try std.testing.expectApproxEqAbs(@as(f64, 100.0), eq[0] + eq[1] + eq[2], 1e-9);
 }
 
 test "icm rejects bad inputs" {

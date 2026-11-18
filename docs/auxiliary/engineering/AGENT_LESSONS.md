@@ -153,7 +153,8 @@ Engine code lives under `engine/` and `host/`. Those modules do not import `desk
 ### Utility sign and player index
 
 - River/street: **player 0 = OOP**, terminal utility is **P0 net chips** (root-centered); IP is the negation under chip zero-sum.
-- **ICM on frozen CFR+:** Production train/BR uses `frozen_walk.applyTerminal`, not deal-by-deal `traversal`. That path must call `modeledTerminal` (chip → `applyIcmTerminal` → incentives). Wiring ICM only in `kernel/terminal.zig` / `action_ev` leaves Study solving chip EV while displaying ICM action values — Fold can be +prize EV while the average strategy still Calls. Rematch: `engine/src/solve/frozen_icm_rematch_test.zig`.
+- **ICM on frozen CFR+:** Production train/BR uses `frozen_walk.applyTerminal`, not deal-by-deal `traversal`. That path must call `modeledTerminal` (chip → ICM cache / `applyIcmTerminal` → incentives). Wiring ICM only in `kernel/terminal.zig` / `action_ev` leaves Study solving chip EV while displaying ICM action values — Fold can be +prize EV while the average strategy still Calls. Rematch: `engine/src/solve/frozen_icm_rematch_test.zig` (true 40% equity bubble; paid bust place). Precompute pre-hand equity + distinct terminal ICM deltas in `icm.TerminalCache` — do not recompute Malmuth-Harville on every showdown visit.
+- **ICM Continue vs chip-trained saves:** Open restores regrets/strategy sums. Pre-fix ICM checkpoints trained in chips; Continuing after the modeled-ICM fix mixes objectives. PSOL `flag_icm_modeled_train` marks post-fix ICM trainer tables; Open strips Continue when ICM is on and the flag is absent. Cash saves need no flag.
 
 **Do:** Treat reported solver EV as OOP/`u0` unless a dual-payoff API says otherwise.  
 **Pointers:** `docs/RIVER.md`, `docs/MATHEMATICS.md`, Zig Session / CFR modules under `engine/`.
@@ -431,7 +432,7 @@ Release A emphasis: M0→M5 plus **core M6**. Most `FEATURE_PARITY.md` rows are 
 | M2 study screen “done” | Categories/draws/composition/undo still thin even if one slice lands |
 | M5 saves “done” | PSOL exists; compact/lazy/multi-file library does not |
 | M6 “done” | Zig Session five-card pins + study corpus; Pio timing/quality unproven |
-| M8 rake/ICM | Chip → ICM → incentives on **every** train/eval terminal: kernel + **frozen** `modeledTerminal` (`frozen_walk.zig`). Skipping ICM in frozen CFR+ trains chip Call when prize EV prefers Fold (`frozen_icm_rematch_test.zig`). |
+| M8 rake/ICM | Chip → ICM → incentives on **every** train/eval terminal: kernel + **frozen** `modeledTerminal` + `TerminalCache` (`frozen_walk.zig`). Skipping ICM in frozen CFR+ trains chip Call when prize EV prefers Fold (`frozen_icm_rematch_test.zig`). Zero stacks take paid last place; pre-fix ICM PSOL disables Continue without `flag_icm_modeled_train`. |
 | “As fast as Pio” | Forbidden without matched protocol (`docs/auxiliary/planning/ROADMAP.md` §6); Acc walls ≠ cutover gates |
 
 **Do:** Update ledger rows only with the demonstrating commit.  

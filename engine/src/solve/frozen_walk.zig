@@ -255,6 +255,8 @@ pub const FrozenCtx = struct {
     /// Non-owning. When set, freeze / floorAndFreeze replace RM with locked rows
     /// (C++ Engine::locks_). Null keeps unlocked freeze bit-identical.
     locks: ?*const node_lock.LockSet = null,
+    /// Pre-hand ICM equity + distinct terminal ICM deltas (outside the walk).
+    icm_cache: icm.TerminalCache = .{},
 
     pub fn init(allocator: std.mem.Allocator, game: compile.CompiledGame, state: *training_state.TrainingState) FrozenError!FrozenCtx {
         return initCommon(allocator, game, state, 1);
@@ -313,6 +315,12 @@ pub const FrozenCtx = struct {
         @memset(ctx.support1, .{});
         try ctx.buildSupport();
         try ctx.buildTwins();
+        if (game.icmConfig().enabled()) {
+            ctx.icm_cache = icm.TerminalCache.init(allocator, game.icmConfig()) catch {
+                return error.InvalidFrozen;
+            };
+            try ctx.warmIcmTerminalCache();
+        }
         ctx.workspace = try WorkerLocal.init(allocator, n0, n1);
         ctx.workspace_ready = true;
         if (threads > 1) {
@@ -360,11 +368,53 @@ pub const FrozenCtx = struct {
             self.allocator.destroy(entry.value_ptr.*);
         }
         self.board_live.deinit();
+        self.icm_cache.deinit();
         self.allocator.free(self.support0);
         self.allocator.free(self.support1);
         self.allocator.free(self.twin0);
         self.allocator.free(self.twin1);
         self.* = undefined;
+    }
+
+    /// Compute each distinct terminal chip→ICM payoff once before the walk.
+    fn warmIcmTerminalCache(self: *FrozenCtx) FrozenError!void {
+        if (!self.icm_cache.active) return;
+        for (self.game.nodes) |node| {
+            if (node.kind != .terminal) continue;
+            if (node.folded >= 0) {
+                try self.warmIcmOne(node, node.folded, 0);
+            } else {
+                try self.warmIcmOne(node, -1, 1);
+                try self.warmIcmOne(node, -1, -1);
+                try self.warmIcmOne(node, -1, 0);
+            }
+        }
+    }
+
+    fn chipTerminalFor(
+        self: *const FrozenCtx,
+        node: compile.Node,
+        folded: i32,
+        outcome: i32,
+    ) FrozenError!payoff.PlayerPayoff {
+        return payoff.chipTerminal(
+            self.game.pot,
+            node.contrib[0],
+            node.contrib[1],
+            folded,
+            outcome,
+            self.game.rake,
+        );
+    }
+
+    fn warmIcmOne(
+        self: *FrozenCtx,
+        node: compile.Node,
+        folded: i32,
+        outcome: i32,
+    ) FrozenError!void {
+        const chips_pay = try self.chipTerminalFor(node, folded, outcome);
+        _ = self.icm_cache.apply(chips_pay) catch return error.InvalidFrozen;
     }
 
     fn startChancePool(self: *FrozenCtx) FrozenError!void {
@@ -1166,24 +1216,19 @@ pub const FrozenCtx = struct {
     }
 
     /// Chip+rake → optional ICM → path incentives. Matches `kernel.terminalPayoff`.
-    /// Empty ICM is a no-alloc fast path; ICM for ≤16 seats is stack-buffered.
+    /// Empty ICM is a no-alloc fast path. When ICM is on, payoffs come from the
+    /// pre-warmed `icm_cache` (pre-hand equity once; distinct terminals once).
     fn modeledTerminal(
         self: *const FrozenCtx,
         node: compile.Node,
         folded: i32,
         outcome: i32,
     ) FrozenError!payoff.PlayerPayoff {
-        const chips_pay = try payoff.chipTerminal(
-            self.game.pot,
-            node.contrib[0],
-            node.contrib[1],
-            folded,
-            outcome,
-            self.game.rake,
-        );
-        var paid = icm.applyIcmTerminal(self.allocator, self.game.icmConfig(), chips_pay) catch {
-            return error.InvalidFrozen;
-        };
+        const chips_pay = try self.chipTerminalFor(node, folded, outcome);
+        var paid = if (self.icm_cache.active)
+            (self.icm_cache.getOrCompute(chips_pay) catch return error.InvalidFrozen)
+        else
+            chips_pay;
         paid.utility[0] += node.incentive_u0;
         paid.utility[1] += node.incentive_u1;
         return paid;
