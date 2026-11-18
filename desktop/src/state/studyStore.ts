@@ -97,7 +97,10 @@ import {
   classifyEngineSessionFault,
   canOfferReopenLastCheckpoint,
   coldReconnectMessage,
+  decideReadyProbeOnExistingChild,
+  decideStatusPollRecovery,
   ensureFailedRecoveryMessage,
+  explicitRestartRecoveryMessage,
   isRecoveryOrUnreachableMessage,
   lastValidCheckpointPath,
   normalizeStatusForPhase,
@@ -105,8 +108,7 @@ import {
   reconnectedMessage,
   reconnectingMessage,
   sessionDeadUiPatch,
-  shouldMarkStatusPollDead,
-  shouldTerminateHungSidecar,
+  shouldSoftRecoverTrainTimeout,
   statusIndicatesFailure,
   statusStickyError,
 } from "../domain/sessionRecovery";
@@ -520,7 +522,19 @@ interface StudyState {
    * Durable recovery: stop polls, clear sticky busy/cancel, re-ensure engine,
    * restart status. Used by Reconnect and after session-dead faults (ZR-123).
    */
-  recoverEngineSession: () => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Durable recovery: re-ensure the engine.
+   * Pass `forceRestart` for explicit Restart Engine (kill then ensure) when a
+   * prior Ready/ensure decision preserved a live child (IPC audit §3).
+   */
+  recoverEngineSession: (opts?: {
+    forceRestart?: boolean;
+  }) => Promise<{
+    ok: boolean;
+    error?: string;
+    /** True when ensure failed but the child should be preserved until Restart. */
+    explicitRestart?: boolean;
+  }>;
   /** Mark unreachable + clear sticky busy without re-ensure (Reconnect follows). */
   markEngineSessionDead: (
     detail: string,
@@ -650,15 +664,23 @@ export function resetRangeEditHistoryForTests() {
   rangeHistory.clear();
 }
 
-/** Re-export session controller test hooks for existing test imports. */
-export { resetStatusPollingForTests, resetAnalysisCacheForTests };
-
 let continuationPending = false;
 /**
  * Where the next successful solution reload should land.
  * `null` = root (new solve / open). `undefined` = no preference (use current/root).
  */
 let pendingReloadNodeId: string | null | undefined = undefined;
+
+/** Test helper — clear poll + analysis tokens and module-level solve latches. */
+export function resetStudyLifecycleForTests(): void {
+  continuationPending = false;
+  pendingReloadNodeId = undefined;
+  resetStatusPollingForTests();
+  resetAnalysisCacheForTests();
+}
+
+/** Re-export session controller test hooks for existing test imports. */
+export { resetStatusPollingForTests, resetAnalysisCacheForTests };
 
 type PublishedStudySnapshot = {
   solutionId: string | null;
@@ -788,6 +810,9 @@ async function stopOrphanTrainIfRunning(): Promise<void> {
 /**
  * Soft-recover train RPC timeout: keep Solving and let status polling finish
  * the lifecycle instead of restoring the prior study and leaving a sticky Busy.
+ *
+ * Only live `running` / `paused` counts as evidence the new train ran — a
+ * pre-existing `solution_id` proves nothing about this command (IPC audit §4).
  */
 async function recoverTrainRpcTimeout(
   get: () => { refresh: () => Promise<void>; startPolling: () => void },
@@ -798,14 +823,15 @@ async function recoverTrainRpcTimeout(
   }
   try {
     const status = await engineClient.status();
-    if (status.running || status.paused || status.solution_id) {
-      // Timeout after write: promote pending → active so Stop targets the live job.
-      engineClient.adoptPendingJobIfRunning(status);
-      continuationPending = true;
-      get().startPolling();
-      await get().refresh();
-      return true;
+    if (!shouldSoftRecoverTrainTimeout(status)) {
+      return false;
     }
+    // Timeout after write: promote pending → active so Stop targets the live job.
+    engineClient.adoptPendingJobIfRunning(status);
+    continuationPending = true;
+    get().startPolling();
+    await get().refresh();
+    return true;
   } catch {
     // Fall through to hard failure.
   }
@@ -2425,7 +2451,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     });
   },
 
-  async recoverEngineSession() {
+  async recoverEngineSession(opts) {
     get().stopPolling();
     continuationPending = false;
     pendingReloadNodeId = undefined;
@@ -2433,6 +2459,17 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     dropAnalysisCaches();
     // Cold sidecar must not cancel/stop against a pre-death job id.
     engineClient.clearLastStudyJobId();
+    const forceRestart = opts?.forceRestart === true;
+    // Explicit Restart Engine: kill the preserved child before re-ensure so a
+    // congested/timeout Ready probe cannot leave an orphan next to a new spawn.
+    if (forceRestart) {
+      const transport = getActiveTransport();
+      const launchId =
+        transport.kind === "ipc" ? transport.launchId : undefined;
+      if (launchId) {
+        await killSolverEngineIpc(launchId);
+      }
+    }
     const priorPhase = get().phase;
     const hadSolution = Boolean(get().solutionId);
     const checkpointPath = lastValidCheckpointPath(
@@ -2447,6 +2484,33 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     });
     const result = await ensureEngine();
     if (!result.ok) {
+      // Ready/ensure against an existing child: congestion / soft timeout must
+      // preserve the process and demand an explicit restart (IPC audit §3).
+      const readyDecision = decideReadyProbeOnExistingChild(result.error);
+      if (
+        !forceRestart &&
+        readyDecision.preserve &&
+        readyDecision.explicitRestart
+      ) {
+        set({
+          connection: "disconnected",
+          message: explicitRestartRecoveryMessage(readyDecision.fault.detail),
+          phase: phaseAfterSessionFault(get().phase, {
+            hadSolution: Boolean(get().solutionId),
+          }),
+        });
+        clearSolveFaultDedupe();
+        void reportSolveFailedFault({
+          reason: readyDecision.fault.detail,
+          exitReason: "reconnect-ensure-fail",
+          lastOp: "ensure",
+        });
+        return {
+          ok: false,
+          error: result.error,
+          explicitRestart: true,
+        };
+      }
       set({
         connection: "disconnected",
         message: ensureFailedRecoveryMessage(result.error),
@@ -2749,17 +2813,16 @@ export const useStudyStore = create<StudyState>((set, get) => ({
             }
           }
           const fullDetail = shellHint ? `${detail}.${shellHint}` : detail;
-          // Soft blips: backoff only. Hard session-dead or N consecutive
-          // failures: paint disconnected + clear sticky busy (ZR-123 / ZR-148).
-          // ZR-151: when hung, terminate the sidecar so Reconnect can spawn fresh.
+          // Single congestion-aware decision (IPC audit §3): pass the thrown
+          // error so typed class / phase / origin / launchId win over text.
           const hungPhase = get().phase;
-          if (
-            shouldMarkStatusPollDead({
-              consecutiveFailures,
-              detail: fullDetail,
-              phase: hungPhase,
-            })
-          ) {
+          const pollRecovery = decideStatusPollRecovery({
+            consecutiveFailures,
+            detail: fullDetail,
+            phase: hungPhase,
+            error,
+          });
+          if (pollRecovery.markDead) {
             void reportUiHangEvent({
               kind: "status-poll-hung",
               durationMs: pollMs,
@@ -2768,19 +2831,15 @@ export const useStudyStore = create<StudyState>((set, get) => ({
               consecutiveStatusFailures: consecutiveFailures,
               phase: hungPhase,
             });
-            if (
-              shouldTerminateHungSidecar({
-                consecutiveFailures,
-                detail: fullDetail,
-                phase: hungPhase,
-              })
-            ) {
+            if (pollRecovery.terminate) {
               // Capture launch id before markEngineSessionDead / transport clear
               // so a late kill cannot tear down a reconnected child (audit #5).
+              // Prefer typed launchId from the fault when the transport was cleared.
               const transport = getActiveTransport();
               const hungLaunchId =
-                transport.kind === "ipc" ? transport.launchId : undefined;
-              void killSolverEngineIpc(hungLaunchId);
+                pollRecovery.fault.launchId ??
+                (transport.kind === "ipc" ? transport.launchId : undefined);
+              void killSolverEngineIpc(hungLaunchId ?? undefined);
             }
             get().markEngineSessionDead(fullDetail);
           }

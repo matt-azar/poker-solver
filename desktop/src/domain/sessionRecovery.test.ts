@@ -7,6 +7,7 @@ import {
   decideReadyProbeOnExistingChild,
   decideStatusPollRecovery,
   disconnectedRecoveryMessage,
+  explicitRestartRecoveryMessage,
   isAdmissionSaturationDetail,
   isEngineSessionDead,
   isRecoveryOrUnreachableMessage,
@@ -17,6 +18,7 @@ import {
   phaseAfterSessionFault,
   sessionDeadUiPatch,
   shouldMarkStatusPollDead,
+  shouldSoftRecoverTrainTimeout,
   shouldTerminateHungSidecar,
   STATUS_POLL_DEAD_AFTER_FAILURES,
   statusIndicatesFailure,
@@ -451,6 +453,39 @@ describe("sessionRecovery", () => {
           phase: "idle",
         }).reason,
       ).toBe("congestion_backoff");
+    });
+
+    it("train timeout soft-recover requires live running/paused — not solution_id alone", () => {
+      expect(
+        shouldSoftRecoverTrainTimeout({
+          running: false,
+          paused: false,
+          solution_id: "s-old",
+        }),
+      ).toBe(false);
+      expect(
+        shouldSoftRecoverTrainTimeout({
+          running: true,
+          paused: false,
+          solution_id: null,
+        }),
+      ).toBe(true);
+      expect(
+        shouldSoftRecoverTrainTimeout({
+          running: false,
+          paused: true,
+          solution_id: "s1",
+        }),
+      ).toBe(true);
+    });
+
+    it("explicit restart copy warns about unsaved work in a live child", () => {
+      const message = explicitRestartRecoveryMessage(
+        "ensure ready probe timed out",
+      );
+      expect(message).toMatch(/Restart Engine/i);
+      expect(message).toMatch(/unsaved/i);
+      expect(isRecoveryOrUnreachableMessage(message)).toBe(true);
     });
   });
 });

@@ -71,6 +71,23 @@ const engineMocks = vi.hoisted(() => {
         combos: ["AcAd"],
         kind: "decision",
       })),
+      getValues: vi.fn(async () => ({
+        pending: false,
+        node_id: "r",
+        solution_id: "s1",
+        actions: ["Check"],
+      })),
+      getEquity: vi.fn(async () => ({
+        pending: false,
+        node_id: "r",
+        solution_id: "s1",
+        equities: [],
+      })),
+      getCategories: vi.fn(async () => ({
+        pending: false,
+        node_id: "r",
+        solution_id: "s1",
+      })),
       getSolutionConfig: vi.fn(async () => null),
       template: vi.fn(async () => ({ text: "" })),
       parseConfig: vi.fn(async () => ({})),
@@ -160,16 +177,19 @@ vi.mock("../platform/diagnostics", () => ({
   boardLenFromStatusBoard: diagMocks.boardLenFromStatusBoard,
 }));
 
-const { resetStatusPollingForTests, useStudyStore } = await import("./studyStore");
+const { resetStudyLifecycleForTests, useStudyStore } = await import("./studyStore");
 
 describe("studyStore session recovery (ZR-123)", () => {
   beforeEach(() => {
-    resetStatusPollingForTests();
+    resetStudyLifecycleForTests();
     engineMocks.ensureEngine.mockClear();
     engineMocks.engineClient.solve.mockClear();
+    engineMocks.engineClient.continueSolve.mockClear();
     engineMocks.engineClient.status.mockClear();
     engineMocks.engineClient.open.mockClear();
     engineMocks.engineClient.clearLastStudyJobId.mockClear();
+    engineMocks.engineClient.adoptPendingJobIfRunning.mockClear();
+    engineMocks.engineClient.lastStopAck.mockClear();
     diagMocks.reportSolveFailedFault.mockClear();
     diagMocks.reportUiHangEvent.mockClear();
     diagMocks.clearSolveFaultDedupe.mockClear();
@@ -492,7 +512,7 @@ describe("studyStore session recovery (ZR-123)", () => {
     expect(state.solutionId).toBe("s2");
   });
 
-  it("ensure-fail recovery clears sticky solving and stays honestly disconnected", async () => {
+  it("ensure pipe-death clears sticky solving and stays honestly disconnected", async () => {
     useStudyStore.setState({
       phase: "solving",
       connection: "disconnected",
@@ -501,20 +521,183 @@ describe("studyStore session recovery (ZR-123)", () => {
     engineMocks.ensureEngine.mockResolvedValueOnce({
       ok: false as const,
       status: "solver-engine unavailable",
-      error: "spawn failed",
+      error: "connection_loss: solver-engine pipe closed",
       transport: {
-        kind: "http-fallback" as const,
+        kind: "no-engine" as const,
         label: "no engine",
       },
     });
 
     const result = await useStudyStore.getState().recoverEngineSession();
     expect(result.ok).toBe(false);
+    expect(result.explicitRestart).toBeFalsy();
     const state = useStudyStore.getState();
     expect(state.connection).toBe("disconnected");
     expect(state.phase).toBe("idle");
     expect(solveControlFlags(state.phase).canSolve).toBe(true);
     expect(state.message).toMatch(/setup failed/i);
+  });
+
+  it("ensure Ready timeout preserves child and demands explicit Restart Engine", async () => {
+    useStudyStore.setState({
+      phase: "complete",
+      connection: "disconnected",
+      solutionId: "s1",
+    });
+    engineMocks.ensureEngine.mockResolvedValueOnce({
+      ok: false as const,
+      status: "solver-engine unavailable",
+      error: "ensure ready probe failed: status request timed out",
+      transport: {
+        kind: "no-engine" as const,
+        label: "no engine",
+      },
+    });
+
+    const result = await useStudyStore.getState().recoverEngineSession();
+    expect(result.ok).toBe(false);
+    expect(result.explicitRestart).toBe(true);
+    const state = useStudyStore.getState();
+    expect(state.connection).toBe("disconnected");
+    expect(state.message).toMatch(/Restart Engine/i);
+    expect(state.message).toMatch(/unsaved/i);
+    expect(state.phase).toBe("complete");
+  });
+
+  it("ensure admission saturation preserves child (no silent teardown)", async () => {
+    useStudyStore.setState({
+      phase: "solving",
+      connection: "connecting",
+      solutionId: "s1",
+    });
+    engineMocks.ensureEngine.mockResolvedValueOnce({
+      ok: false as const,
+      status: "solver-engine unavailable",
+      error: "admission saturated: 8/8 outstanding requests",
+      transport: {
+        kind: "no-engine" as const,
+        label: "no engine",
+      },
+    });
+
+    const result = await useStudyStore.getState().recoverEngineSession();
+    expect(result.ok).toBe(false);
+    expect(result.explicitRestart).toBe(true);
+    expect(useStudyStore.getState().message).toMatch(/Restart Engine/i);
+  });
+
+  it("status admission saturation during Solving does not hung-kill", async () => {
+    let calls = 0;
+    engineMocks.setStatusImpl(async () => {
+      calls += 1;
+      throw Object.assign(new Error("admission saturated: 8/8 outstanding requests"), {
+        ipcClass: "queue_saturation",
+        phase: "before_write",
+        origin: "status",
+        launchId: "launch-sat",
+      });
+    });
+    useStudyStore.setState({
+      phase: "solving",
+      connection: "connected",
+      message: "Solving — 12/200 iterations",
+      solutionId: "s1",
+    });
+    // Three consecutive congestion faults — policy is backoff, not terminate.
+    await useStudyStore.getState().refresh();
+    await useStudyStore.getState().refresh();
+    await useStudyStore.getState().refresh();
+    expect(calls).toBeGreaterThanOrEqual(3);
+    const state = useStudyStore.getState();
+    expect(state.connection).toBe("connected");
+    expect(state.phase).toBe("solving");
+    expect(state.message).not.toMatch(/Engine unreachable/);
+  });
+
+  it("soft status timeouts in Complete do not paint unreachable", async () => {
+    engineMocks.setStatusImpl(async () => {
+      throw Object.assign(new Error("status request timed out"), {
+        ipcClass: "timeout",
+        phase: "after_write",
+        origin: "status-poll",
+        launchId: "launch-complete",
+      });
+    });
+    useStudyStore.setState({
+      phase: "complete",
+      connection: "connected",
+      message: "Solve complete.",
+      solutionId: "s1",
+    });
+    await useStudyStore.getState().refresh();
+    await useStudyStore.getState().refresh();
+    await useStudyStore.getState().refresh();
+    const state = useStudyStore.getState();
+    expect(state.connection).toBe("connected");
+    expect(state.phase).toBe("complete");
+    expect(state.message).not.toMatch(/Engine unreachable/);
+  });
+
+  it("train RPC timeout does not treat a stale solution_id as progress", async () => {
+    engineMocks.engineClient.solve.mockRejectedValueOnce(
+      new engineMocks.EngineError("solver_engine_request timed out", 504, null),
+    );
+    engineMocks.setStatusImpl(async () => ({
+      running: false,
+      paused: false,
+      cancelled: false,
+      failed: false,
+      // Prior published solution still present — not evidence this train ran.
+      solution_id: "s-old",
+      status_generation: 20,
+      phase: "published",
+    }));
+    useStudyStore.setState({
+      phase: "idle",
+      connection: "connected",
+      solutionId: "s-old",
+      draft: {
+        ...useStudyStore.getState().draft,
+        boardText: "Ah Kd 7c",
+        iterations: 10,
+      },
+    });
+    await useStudyStore.getState().solve();
+    expect(engineMocks.engineClient.adoptPendingJobIfRunning).not.toHaveBeenCalled();
+    const state = useStudyStore.getState();
+    // Hard failure path restores prior study rather than soft-continuing.
+    expect(state.phase).not.toBe("solving");
+    expect(state.phase).not.toBe("building");
+  });
+
+  it("train RPC timeout soft-recovers when host is still running", async () => {
+    engineMocks.engineClient.continueSolve.mockRejectedValueOnce(
+      new engineMocks.EngineError("solver_engine_request timed out", 504, null),
+    );
+    engineMocks.setStatusImpl(async () => ({
+      running: true,
+      paused: false,
+      cancelled: false,
+      failed: false,
+      solution_id: "s1",
+      job_id: "j-live",
+      status_generation: 21,
+      phase: "training",
+      iterations: 4,
+      iterations_requested: 40,
+    }));
+    useStudyStore.setState({
+      phase: "solving",
+      connection: "connected",
+      solutionId: "s1",
+      draft: {
+        ...useStudyStore.getState().draft,
+        iterations: 40,
+      },
+    });
+    await useStudyStore.getState().continueSolve();
+    expect(engineMocks.engineClient.adoptPendingJobIfRunning).toHaveBeenCalled();
+    expect(useStudyStore.getState().phase).not.toBe("failed");
   });
 
   it("refresh maps host phase=failed to Study failed without permanent busy", async () => {
@@ -621,10 +804,10 @@ describe("studyStore session recovery (ZR-123)", () => {
     });
     await useStudyStore.getState().refresh();
     const state = useStudyStore.getState();
-    expect(state.phase).toBe("failed");
+    expect(state.status?.failed).toBe(true);
     expect(state.status?.last_error).toBe("InvalidSession");
     // Footer sentence prefers sticky last_error over any store fallback
-    // (navigate/analysis may overwrite message after reload).
+    // (navigate/analysis may overwrite message/phase after reload).
     expect(
       engineActivityMessage(state.phase, state.status, state.message),
     ).toBe("InvalidSession");
