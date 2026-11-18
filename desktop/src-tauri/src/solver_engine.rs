@@ -56,6 +56,14 @@ const SIDECAR_BASENAME: &str = "solver-engine";
 const EXTERNAL_BIN: &str = "binaries/solver-engine";
 /// Override sidecar path for acceptance / harness (test sidecar).
 const SIDECAR_ENV: &str = "STUDY_SOLVER_ENGINE";
+/// Extra argv for the sidecar (whitespace-separated). Used by installer Stage
+/// BlockedWrite / cargo acceptance to pass `--stop-reading-after` /
+/// `--stop-reading-after-bytes` to `ipc-test-sidecar` without a wrapper binary.
+const SIDECAR_ARGS_ENV: &str = "STUDY_SOLVER_ENGINE_ARGS";
+/// When `1`/`true` and [`SIDECAR_ENV`] is set, append `--stop-reading-after 1`
+/// unless already present in [`SIDECAR_ARGS_ENV`]. Safe: never auto-arms the
+/// production Zig binary (no path override).
+const BLOCKED_WRITE_ENV: &str = "STUDY_IPC_BLOCKED_WRITE";
 const READY_TIMEOUT: Duration = Duration::from_secs(8);
 /// Default RPC budget (node / values / most ops).
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(240);
@@ -73,13 +81,120 @@ const TRAIN_ADMIT_TIMEOUT: Duration = Duration::from_secs(15);
 const EXIT_REAP_TIMEOUT: Duration = Duration::from_secs(3);
 
 fn timeout_for_op(op: &str) -> Duration {
-    match op {
+    let base = match op {
         "solve" | "resolve_locked" => TRAIN_ADMIT_TIMEOUT,
         "begin_config" => BEGIN_CONFIG_TIMEOUT,
         "status" => STATUS_RPC_TIMEOUT,
         "cancel" | "pause" => STATUS_RPC_TIMEOUT,
         _ => REQUEST_TIMEOUT,
+    };
+    // Stage BlockedWrite / STUDY_IPC_BLOCKED_WRITE: keep RPC budgets short so a
+    // mid-frame write_all stall surfaces as unknown-after-write inside the
+    // installer StudyReadySec window (not a 240s hang on save/node).
+    if ipc_blocked_write_armed() && !matches!(op, "ready" | "status" | "cancel" | "pause") {
+        return base.min(Duration::from_secs(2));
     }
+    base
+}
+
+/// Split `STUDY_SOLVER_ENGINE_ARGS` on whitespace with basic `"..."` / `'...'`
+/// quoting (no escapes). Empty / unset → no extras.
+pub fn parse_sidecar_args_env(raw: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut chars = raw.chars().peekable();
+    let mut in_quote: Option<char> = None;
+    while let Some(ch) = chars.next() {
+        match in_quote {
+            Some(q) => {
+                if ch == q {
+                    in_quote = None;
+                } else {
+                    cur.push(ch);
+                }
+            }
+            None => {
+                if ch == '"' || ch == '\'' {
+                    in_quote = Some(ch);
+                } else if ch.is_whitespace() {
+                    if !cur.is_empty() {
+                        out.push(std::mem::take(&mut cur));
+                    }
+                } else {
+                    cur.push(ch);
+                }
+            }
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+fn args_have_stop_reading(args: &[String]) -> bool {
+    args.iter().any(|a| {
+        a == "--stop-reading-after"
+            || a == "--stop-reading-after-bytes"
+            || a.starts_with("--stop-reading-after=")
+            || a.starts_with("--stop-reading-after-bytes=")
+    })
+}
+
+fn installer_stage_is_blocked_write() -> bool {
+    std::env::var("STUDY_INSTALLER_E2E")
+        .ok()
+        .map(|s| s.trim().eq_ignore_ascii_case("stage-blocked-write"))
+        .unwrap_or(false)
+}
+
+fn blocked_write_env_armed() -> bool {
+    matches!(
+        std::env::var(BLOCKED_WRITE_ENV).as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE")
+    ) || installer_stage_is_blocked_write()
+}
+
+fn has_test_sidecar_override() -> bool {
+    std::env::var(SIDECAR_ENV)
+        .ok()
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false)
+}
+
+/// Extra argv applied by [`spawn_session`] after `--launch-id`.
+///
+/// Sources (in order):
+/// 1. `STUDY_SOLVER_ENGINE_ARGS` (always honored when set)
+/// 2. Auto `--stop-reading-after 1` when Stage BlockedWrite /
+///    `STUDY_IPC_BLOCKED_WRITE=1` **and** `STUDY_SOLVER_ENGINE` overrides the
+///    binary (ipc-test-sidecar). Never injects flags into production Zig.
+pub fn sidecar_extra_args() -> Vec<String> {
+    let mut args = std::env::var(SIDECAR_ARGS_ENV)
+        .ok()
+        .map(|s| parse_sidecar_args_env(&s))
+        .unwrap_or_default();
+    if blocked_write_env_armed()
+        && has_test_sidecar_override()
+        && !args_have_stop_reading(&args)
+    {
+        args.push("--stop-reading-after".into());
+        args.push("1".into());
+    }
+    args
+}
+
+/// True when spawn will pass a stop-reading / blocked-write arm to the child.
+/// Installer Stage BlockedWrite uses this to FAIL (not SKIP) when unarmed.
+#[tauri::command]
+pub fn ipc_blocked_write_armed() -> bool {
+    has_test_sidecar_override() && args_have_stop_reading(&sidecar_extra_args())
+}
+
+/// Extra argv `spawn_session` will append (diagnostics / WebView probes).
+#[tauri::command]
+pub fn solver_engine_extra_args() -> Vec<String> {
+    sidecar_extra_args()
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -781,9 +896,17 @@ fn spawn_session(app: &AppHandle, launch_id: &str) -> Result<PipeSession, String
     // that console kills the child and bricks Study IPC. Prefer Zig
     // `subsystem = .Windows` for new builds; this flag is defense in depth.
     let mut cmd = Command::new(&path);
-    cmd.arg("--launch-id")
-        .arg(launch_id)
-        .stdin(Stdio::piped())
+    cmd.arg("--launch-id").arg(launch_id);
+    let extra = sidecar_extra_args();
+    if !extra.is_empty() {
+        eprintln!(
+            "info: solver-engine extra args from {SIDECAR_ARGS_ENV}/blocked-write arm: {extra:?}"
+        );
+        for a in &extra {
+            cmd.arg(a);
+        }
+    }
+    cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     #[cfg(windows)]
@@ -1992,6 +2115,45 @@ mod tests {
         assert_eq!(state.launch_id_snapshot().as_deref(), Some("zig-cafef00d-2"));
     }
 
+    #[test]
+    fn parse_sidecar_args_env_splits_and_quotes() {
+        assert!(parse_sidecar_args_env("").is_empty());
+        assert_eq!(
+            parse_sidecar_args_env("--stop-reading-after 1"),
+            vec!["--stop-reading-after".to_string(), "1".to_string()]
+        );
+        assert_eq!(
+            parse_sidecar_args_env("--stop-reading-after-bytes 8"),
+            vec![
+                "--stop-reading-after-bytes".to_string(),
+                "8".to_string()
+            ]
+        );
+        assert_eq!(
+            parse_sidecar_args_env(r#"--flag "path with spaces""#),
+            vec!["--flag".to_string(), "path with spaces".to_string()]
+        );
+    }
+
+    #[test]
+    fn args_have_stop_reading_detects_both_arms() {
+        assert!(!args_have_stop_reading(&[]));
+        assert!(args_have_stop_reading(&[
+            "--stop-reading-after".into(),
+            "1".into()
+        ]));
+        assert!(args_have_stop_reading(&[
+            "--stop-reading-after-bytes".into(),
+            "4".into()
+        ]));
+        assert!(args_have_stop_reading(&[
+            "--stop-reading-after=1".into()
+        ]));
+        assert!(!args_have_stop_reading(&[
+            "--malformed-after-ready".into()
+        ]));
+    }
+
     /// Connection-scoped kill needs a real OS child (`sleep`). Unix-only.
     #[cfg(unix)]
     mod connection_scoped {
@@ -2693,6 +2855,69 @@ mod tests {
                 started.elapsed() < EXIT_REAP_TIMEOUT + Duration::from_secs(2),
                 "kill must reap within exit deadline"
             );
+        }
+
+        /// Product-path BlockedWrite arm: stop draining mid-frame (length
+        /// prefix only of the post-ready request), then send a large mutating
+        /// frame so `write_all` blocks. Deadline must surface as
+        /// `unknown-after-write` (Writing started) — not only a small-request
+        /// reply timeout after a completed write into the pipe buffer.
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn mid_frame_blocked_write_reports_unknown_after_write() {
+            let session = spawn_supervised_test_sidecar_args(
+                "accept-mid-frame-block",
+                // After ready is answered: read only 4 more stdin bytes (next
+                // frame's length prefix), then park — body never drains.
+                &["--stop-reading-after", "1", "--partial-drain-bytes", "4"],
+            );
+            let io = Arc::clone(&session.io);
+            rpc_shared(&io, "ready", Value::Null, None, READY_TIMEOUT)
+                .await
+                .expect("ready");
+
+            // ~256 KiB path padding → frame exceeds typical pipe buffer so
+            // write_all blocks while delivery is Writing.
+            let big_path = format!("/tmp/blocked-{}.psol", "x".repeat(256 * 1024));
+            let err = rpc_shared(
+                &io,
+                "save",
+                json!({ "path": big_path }),
+                None,
+                Duration::from_millis(400),
+            )
+            .await
+            .expect_err("blocked mid-frame write must miss the deadline");
+
+            let s = err.to_string();
+            let after_write = matches!(
+                &err,
+                IpcError::Timeout {
+                    phase: TimeoutPhase::AfterWrite,
+                    ..
+                }
+            ) || s.contains("unknown-after-write")
+                || s.contains("after_write");
+            let connection = err.is_connection_loss();
+            assert!(
+                after_write || connection || s.contains("write:"),
+                "expected Writing-phase / unknown-after-write (or pipe death), got {err:?}"
+            );
+            // Must not be a "never sent" before-write cancel alone — the arm
+            // is meant to exercise an in-progress write_all.
+            if let IpcError::Timeout { phase, .. } = &err {
+                assert_ne!(
+                    *phase,
+                    TimeoutPhase::BeforeWrite,
+                    "mid-frame block should reach Writing, not expire while queued only: {err:?}"
+                );
+            }
+
+            let state = SolverEngineState::new();
+            {
+                let mut guard = state.session.lock().unwrap();
+                *guard = Some(session);
+            }
+            kill_solver_engine(&state);
         }
 
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

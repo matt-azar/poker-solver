@@ -115,26 +115,47 @@ describe("runBlockedWriteProbe", () => {
     invoke.mockReset();
   });
 
-  it("skips with Rust-hook TODO when sidecar keeps answering", async () => {
+  it("fails when the Rust blocked-write arm is not active", async () => {
     const { runBlockedWriteProbe } = await import("./ipcAcceptance");
     invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "ipc_blocked_write_armed") return false;
+      if (cmd === "solver_engine_extra_args") return [];
+      throw new Error(`unexpected invoke ${cmd}`);
+    });
+    const result = await runBlockedWriteProbe();
+    expect(result.ok).toBe(false);
+    expect(result.skipped).toBeFalsy();
+    expect(result.stage).toBe("BlockedWrite");
+    expect(result.detail).toMatch(/arm not active/);
+  });
+
+  it("fails when armed but sidecar keeps answering", async () => {
+    const { runBlockedWriteProbe } = await import("./ipcAcceptance");
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "ipc_blocked_write_armed") return true;
+      if (cmd === "solver_engine_extra_args") {
+        return ["--stop-reading-after", "1"];
+      }
       if (cmd === "solver_engine_request") {
         return { ok: true, body: { kind: "decision" } };
       }
       throw new Error(`unexpected invoke ${cmd}`);
     });
     const result = await runBlockedWriteProbe();
-    expect(result.ok).toBe(true);
-    expect(result.skipped).toBe(true);
-    expect(result.stage).toBe("BlockedWrite");
-    expect(result.detail).toMatch(/STUDY_SOLVER_ENGINE_ARGS/);
+    expect(result.ok).toBe(false);
+    expect(result.skipped).toBeFalsy();
+    expect(result.detail).toMatch(/no write\/admission bound/);
   });
 
   it("passes when a write/admission bound is observed", async () => {
     const { runBlockedWriteProbe } = await import("./ipcAcceptance");
     invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "ipc_blocked_write_armed") return true;
+      if (cmd === "solver_engine_extra_args") {
+        return ["--stop-reading-after", "1", "--partial-drain-bytes", "4"];
+      }
       if (cmd === "solver_engine_request") {
-        throw new Error("admission saturated: queued bytes");
+        throw new Error("unknown-after-write: op save deadline elapsed after write started");
       }
       if (cmd === "solver_engine_info") return { launchId: "L1" };
       if (cmd === "kill_solver_engine_cmd") return null;

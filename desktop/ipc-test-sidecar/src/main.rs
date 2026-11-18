@@ -10,11 +10,29 @@
 //! - `--malformed-after-ready`: after ready, emit a garbage frame (protocol death)
 //! - `--exit-after-ready`: exit immediately after answering ready
 //! - `--reject-next <code>`: next non-ready op returns ok:false with that error_code
-//! - `--stop-reading-after <n>`: answer n requests then stop reading stdin (queue test)
+//! - `--stop-reading-after <n>`: answer n requests then stop draining stdin
+//! - `--partial-drain-bytes <n>`: with stop-reading-after, read exactly n more
+//!   stdin bytes of the next frame then park (mid-frame blocked-write arm)
+//! - `--stop-reading-after-bytes <n>`: after answering ready, read at most n
+//!   additional stdin bytes then park mid-stream
 
 use std::io::{self, Read, Write};
 
 use serde_json::{json, Value};
+
+fn read_exact_or_eof(stdin: &mut impl Read, want: usize, into: &mut Vec<u8>) -> io::Result<usize> {
+    let mut got = 0usize;
+    while got < want {
+        let mut chunk = vec![0u8; (want - got).min(8192)];
+        let n = stdin.read(&mut chunk)?;
+        if n == 0 {
+            break;
+        }
+        into.extend_from_slice(&chunk[..n]);
+        got += n;
+    }
+    Ok(got)
+}
 
 fn read_frame(stdin: &mut impl Read, stash: &mut Vec<u8>) -> io::Result<Value> {
     while stash.len() < 4 {
@@ -99,12 +117,23 @@ fn reply_err(
     })
 }
 
+fn park_forever(reason: &str) -> ! {
+    eprintln!("ipc-test-sidecar: {reason}");
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(60));
+    }
+}
+
 struct Mode {
     launch_id: String,
     malformed_after_ready: bool,
     exit_after_ready: bool,
     reject_code: Option<String>,
     stop_reading_after: Option<usize>,
+    /// After stop-reading-after answers, read this many more stdin bytes then park.
+    partial_drain_bytes: Option<usize>,
+    /// After answering ready, allow at most this many additional stdin bytes.
+    stop_reading_after_bytes: Option<usize>,
 }
 
 fn parse_args() -> Mode {
@@ -114,6 +143,8 @@ fn parse_args() -> Mode {
         exit_after_ready: false,
         reject_code: None,
         stop_reading_after: None,
+        partial_drain_bytes: None,
+        stop_reading_after_bytes: None,
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -134,6 +165,13 @@ fn parse_args() -> Mode {
                     .and_then(|s| s.parse().ok())
                     .or(Some(1));
             }
+            "--partial-drain-bytes" => {
+                mode.partial_drain_bytes = args.next().and_then(|s| s.parse().ok()).or(Some(4));
+            }
+            "--stop-reading-after-bytes" => {
+                mode.stop_reading_after_bytes =
+                    args.next().and_then(|s| s.parse().ok()).or(Some(4));
+            }
             other => eprintln!("ipc-test-sidecar: ignoring unknown arg {other}"),
         }
     }
@@ -150,21 +188,40 @@ fn main() {
     let mut answered: usize = 0;
     let mut ready_done = false;
     let mut reject_armed = mode.reject_code.clone();
+    let mut post_ready_bytes: usize = 0;
 
     loop {
         if let Some(limit) = mode.stop_reading_after {
             if answered >= limit {
-                eprintln!(
-                    "ipc-test-sidecar: stop-reading after {limit} answers (stdin ignored)"
-                );
-                // Park forever without reading — host write queue must bound.
-                loop {
-                    std::thread::sleep(std::time::Duration::from_secs(60));
+                if let Some(n) = mode.partial_drain_bytes {
+                    let mut buf = Vec::with_capacity(n);
+                    let got = read_exact_or_eof(&mut stdin, n, &mut buf).unwrap_or(0);
+                    park_forever(&format!(
+                        "stop-reading after {limit} answers; partial-drain {got}/{n} bytes (stdin mid-frame ignored)"
+                    ));
                 }
+                park_forever(&format!(
+                    "stop-reading after {limit} answers (stdin ignored)"
+                ));
             }
         }
 
-        let req = match read_frame(&mut stdin, &mut stash) {
+        let req = if ready_done {
+            if let Some(budget) = mode.stop_reading_after_bytes {
+                read_frame_with_byte_budget(
+                    &mut stdin,
+                    &mut stash,
+                    &mut post_ready_bytes,
+                    budget,
+                )
+            } else {
+                read_frame(&mut stdin, &mut stash)
+            }
+        } else {
+            read_frame(&mut stdin, &mut stash)
+        };
+
+        let req = match req {
             Ok(v) => v,
             Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => break,
             Err(err) => {
@@ -172,6 +229,7 @@ fn main() {
                 break;
             }
         };
+
         let kind = req.get("kind").and_then(|v| v.as_str()).unwrap_or("");
         if kind != "request" {
             continue;
@@ -275,6 +333,54 @@ fn main() {
                 break;
             }
         }
-        let _ = ready_done;
     }
+}
+
+/// Read one frame, but never consume more than `budget - *spent` additional
+/// stdin bytes. Parks forever if the budget is exhausted mid-frame.
+fn read_frame_with_byte_budget(
+    stdin: &mut impl Read,
+    stash: &mut Vec<u8>,
+    spent: &mut usize,
+    budget: usize,
+) -> io::Result<Value> {
+    let fill_to = |stdin: &mut dyn Read, stash: &mut Vec<u8>, spent: &mut usize, need: usize| {
+        while stash.len() < need {
+            if *spent >= budget {
+                park_forever(&format!(
+                    "stop-reading-after-bytes: parked mid-frame after {spent}/{budget}"
+                ));
+            }
+            let rem = budget - *spent;
+            let chunk_want = (need - stash.len()).min(rem).min(8192);
+            let mut chunk = vec![0u8; chunk_want];
+            let n = stdin.read(&mut chunk)?;
+            if n == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "stdin closed mid-frame under byte budget",
+                ));
+            }
+            stash.extend_from_slice(&chunk[..n]);
+            *spent += n;
+        }
+        Ok(())
+    };
+
+    fill_to(stdin, stash, spent, 4)?;
+    let mut len_bytes = [0u8; 4];
+    len_bytes.copy_from_slice(&stash[..4]);
+    let len = u32::from_le_bytes(len_bytes) as usize;
+    if len == 0 || len > 16 * 1024 * 1024 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("bad frame length {len}"),
+        ));
+    }
+    fill_to(stdin, stash, spent, 4 + len)?;
+    let payload = stash[4..4 + len].to_vec();
+    stash.drain(..4 + len);
+    serde_json::from_slice(&payload).map_err(|err| {
+        io::Error::new(io::ErrorKind::InvalidData, format!("json decode: {err}"))
+    })
 }
