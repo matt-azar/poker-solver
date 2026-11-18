@@ -1,10 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capabilities for Hold'em Study (webview + Zig solver-engine sidecar)",
+  "description": "Default capabilities for Hold'em Study (webview + Zig solver-engine sidecar). Includes core:window:allow-close/destroy so JS Close (NormalClosePending installer E2E) is not ACL-denied.",
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "core:window:allow-close",
+    "core:window:allow-destroy",
     {
       "identifier": "shell:allow-spawn",
       "allow": [
