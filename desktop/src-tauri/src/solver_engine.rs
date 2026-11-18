@@ -44,7 +44,7 @@ use tokio::sync::oneshot;
 
 use crate::diagnostics;
 use crate::solver_admission::{
-    self, classify_op, is_mutating, AdmissionBoard, OpClass, StatusRole, MAX_OUTSTANDING,
+    self, classify_op, is_mutating, AdmissionBoard, OpClass, StatusRole,
 };
 use crate::solver_ipc::{
     duration_ms, validate_reply, IpcDiagSample, IpcError, PendingWaiter, ReplyValidation,
@@ -1354,23 +1354,26 @@ async fn rpc_shared(
     match tokio::time::timeout(remaining, reply_rx).await {
         Ok(Ok(result)) => {
             if let Some(ref key) = reconcile_key {
-                if let Ok(Ok(ref reply)) = result {
-                    if let Ok(mut ledger) = io.mutations.lock() {
-                        ledger.insert(
-                            key.clone(),
-                            MutationReceipt::Done {
-                                reply: reply.clone(),
-                            },
-                        );
+                if let Ok(mut ledger) = io.mutations.lock() {
+                    match &result {
+                        Ok(reply) => {
+                            ledger.insert(
+                                key.clone(),
+                                MutationReceipt::Done {
+                                    reply: reply.clone(),
+                                },
+                            );
+                        }
+                        Err(_) => {
+                            // Transport-level Err after write — leave Unknown for reconcile.
+                            ledger.insert(
+                                key.clone(),
+                                MutationReceipt::Unknown {
+                                    request_id: request_id.clone(),
+                                },
+                            );
+                        }
                     }
-                } else if let Ok(mut ledger) = io.mutations.lock() {
-                    // Transport-level Err after write — leave Unknown for reconcile.
-                    ledger.insert(
-                        key.clone(),
-                        MutationReceipt::Unknown {
-                            request_id: request_id.clone(),
-                        },
-                    );
                 }
             }
             result
