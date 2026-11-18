@@ -61,14 +61,14 @@ describe("MatrixDisplayControls", () => {
     fireEvent.click(fill);
     expect(useMatrixDisplayStore.getState().prefs.rangeWeightHeightFill).toBe(true);
 
-    const select = screen.getByLabelText("Numbers");
+    const select = screen.getByLabelText("Overlay");
     fireEvent.change(select, { target: { value: "equity" } });
     expect(useMatrixDisplayStore.getState().prefs.cellOverlay).toBe("equity");
   });
 
   it("auto-loads equity when equity overlay is selected", async () => {
     render(<MatrixDisplayControls />);
-    fireEvent.change(screen.getByLabelText("Numbers"), {
+    fireEvent.change(screen.getByLabelText("Overlay"), {
       target: { value: "equity" },
     });
     await waitFor(() => {
@@ -81,7 +81,7 @@ describe("MatrixDisplayControls", () => {
 
   it("auto-loads EV when EV overlay is selected", async () => {
     render(<MatrixDisplayControls />);
-    fireEvent.change(screen.getByLabelText("Numbers"), {
+    fireEvent.change(screen.getByLabelText("Overlay"), {
       target: { value: "ev" },
     });
     await waitFor(() => {
@@ -93,7 +93,7 @@ describe("MatrixDisplayControls", () => {
 
   it("uses the selection owner when EV+Eq overlay needs both metrics", async () => {
     render(<MatrixDisplayControls />);
-    fireEvent.change(screen.getByLabelText("Numbers"), {
+    fireEvent.change(screen.getByLabelText("Overlay"), {
       target: { value: "both" },
     });
     await waitFor(() => {
@@ -115,7 +115,7 @@ describe("MatrixDisplayControls", () => {
     useMatrixDisplayStore.getState().setCellOverlay("equity");
     render(<MatrixDisplayControls />);
     await waitFor(() => {
-      expect(screen.getByLabelText("Numbers")).toBeTruthy();
+      expect(screen.getByLabelText("Overlay")).toBeTruthy();
     });
     expect(loadEquity).not.toHaveBeenCalled();
     expect(ensureNodeAnalysis).not.toHaveBeenCalled();
@@ -137,7 +137,7 @@ describe("MatrixDisplayControls", () => {
     useMatrixDisplayStore.getState().setCellOverlay("equity");
     render(<MatrixDisplayControls />);
     await waitFor(() => {
-      expect(screen.getByLabelText("Numbers")).toBeTruthy();
+      expect(screen.getByLabelText("Overlay")).toBeTruthy();
     });
     expect(loadEquity).not.toHaveBeenCalled();
   });

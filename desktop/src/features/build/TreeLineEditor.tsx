@@ -1,55 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   abbreviateActionLine,
   potFacingAfterPath,
 } from "../../domain/actionHistory";
 import { formatActionDisplay } from "../../domain/betSizes";
+import { engineClient, EngineError } from "../../engine/client";
 import type {
   MemoryPlanPayload,
+  SpotDraft,
   TreePreviewAction,
   TreePreviewNode,
+  TreePreviewPayload,
 } from "../../domain/types";
+import { portableJobFromDraft } from "../../domain/studyJob";
 import { useStudyStore } from "../../state/studyStore";
-import { useTreePreviewPlan } from "./useTreePreviewPlan";
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  if (bytes < 1048576) {
-    return `${(bytes / 1024).toFixed(1)} KiB`;
-  }
-  return `${(bytes / 1048576).toFixed(1)} MiB`;
-}
-
-function MemoryPlanStrip({
-  plan,
-  pot,
-  stack,
-}: {
-  plan: MemoryPlanPayload;
-  pot: number;
-  stack: number;
-}) {
-  return (
-    <div
-      className="memory-plan"
-      data-over-budget={plan.fits_budget ? undefined : "true"}
-    >
-      <span>
-        Plan peak {formatBytes(plan.estimated_peak_bytes)}
-        {plan.fits_budget ? "" : " (over budget)"}
-      </span>
-      <span>
-        Budget {formatBytes(plan.memory_budget_bytes)} · {plan.public_decisions}{" "}
-        decisions · {plan.deals} deals
-      </span>
-      <span className="tree-meta">
-        pot {pot} · stack {stack}
-      </span>
-    </div>
-  );
-}
 
 /** Display labels → compact TreeEdit tokens (no spaces) for street-config text. */
 function compactLabel(label: string): string {
@@ -93,6 +57,24 @@ function addSizeLine(path: string, sizeText: string): string {
   return `add-size ${pathToken(path)} ${sizeText}`;
 }
 
+/**
+ * Same portable street-config the CLI plan/solve job carries — Build Preview and
+ * holdem-study-cli share one canonical document (not a parallel SolveJob shape).
+ */
+function draftPreviewBody(draft: SpotDraft): { text: string } {
+  return { text: portableJobFromDraft(draft).street_config };
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1048576) {
+    return `${(bytes / 1024).toFixed(1)} KiB`;
+  }
+  return `${(bytes / 1048576).toFixed(1)} MiB`;
+}
+
 function actionKey(nodeIndex: number, compact: string): string {
   return `${nodeIndex}:${compact}`;
 }
@@ -121,6 +103,35 @@ function nextDecision(
     index = node.chance_child;
   }
   return null;
+}
+
+function MemoryPlanStrip({
+  plan,
+  pot,
+  stack,
+}: {
+  plan: MemoryPlanPayload;
+  pot: number;
+  stack: number;
+}) {
+  return (
+    <div
+      className="memory-plan"
+      data-over-budget={plan.fits_budget ? undefined : "true"}
+    >
+      <span>
+        Plan peak {formatBytes(plan.estimated_peak_bytes)}
+        {plan.fits_budget ? "" : " (over budget)"}
+      </span>
+      <span>
+        Budget {formatBytes(plan.memory_budget_bytes)} · {plan.public_decisions}{" "}
+        decisions · {plan.deals} deals
+      </span>
+      <span className="tree-meta">
+        pot {pot} · stack {stack}
+      </span>
+    </div>
+  );
 }
 
 function TreeActionBranch({
@@ -288,28 +299,142 @@ function abbreviatePathForMeta(path: string, rootPot: number): string {
   return abbreviateActionLine(path, rootPot);
 }
 
-interface TreeLineEditorProps {
-  /** When true, Build header owns the MemoryPlanStrip (avoids duplicate chrome). */
-  hideMemoryStrip?: boolean;
-  /** Notify Build header of the latest memory plan from the single tree_preview poll. */
-  onPlanChange?: (plan: MemoryPlanPayload | null) => void;
+/** Phases where Build must not issue tree_preview (ZR-158 stdin starvation). */
+function previewBlockedPhase(phase: string): boolean {
+  return (
+    phase === "building" ||
+    phase === "solving" ||
+    phase === "pause_requested" ||
+    phase === "stop_requested"
+  );
 }
 
-export function TreeLineEditor({
-  hideMemoryStrip = false,
-  onPlanChange,
-}: TreeLineEditorProps = {}) {
+export function TreeLineEditor() {
   const draft = useStudyStore((s) => s.draft);
+  const phase = useStudyStore((s) => s.phase);
   const updateDraft = useStudyStore((s) => s.updateDraft);
-  const { preview, plan, error, busy, refresh } = useTreePreviewPlan();
   const [open, setOpen] = useState(false);
+  const [preview, setPreview] = useState<TreePreviewPayload | null>(null);
+  const [plan, setPlan] = useState<MemoryPlanPayload | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [addSizePath, setAddSizePath] = useState<string | null>(null);
   const [addSizeValue, setAddSizeValue] = useState("0.33");
+  const requestId = useRef(0);
+  /** Bumps when the draft that shapes the tree changes — clears stale preview. */
+  const draftRevision = useRef(0);
+
+  const clearStalePreview = () => {
+    draftRevision.current += 1;
+    setPreview(null);
+    setPlan(null);
+    setError("");
+    setSelectedKey(null);
+  };
+
+  const refresh = async () => {
+    // Host tree_preview is async/cancellable, but still refuse while Solve/begin
+    // is active so preview does not race train heap traffic (ZR-158).
+    if (previewBlockedPhase(useStudyStore.getState().phase)) {
+      return;
+    }
+    const id = ++requestId.current;
+    const revision = draftRevision.current;
+    setBusy(true);
+    setError("");
+    try {
+      const body = draftPreviewBody(draft);
+      // One plan-only construction returns nodes + labeled memory plan.
+      const tree = await engineClient.treePreview(body);
+      if (id !== requestId.current || revision !== draftRevision.current) {
+        return;
+      }
+      setPreview(tree);
+      setPlan(tree.plan ?? null);
+    } catch (err) {
+      if (id !== requestId.current || revision !== draftRevision.current) {
+        return;
+      }
+      const message =
+        err instanceof EngineError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Tree preview failed";
+      // Failed preview must not touch the live Study solution — only local UI.
+      setError(message);
+      setPreview(null);
+      setPlan(null);
+    } finally {
+      if (id === requestId.current) {
+        setBusy(false);
+      }
+    }
+  };
 
   useEffect(() => {
-    onPlanChange?.(plan);
-  }, [plan, onPlanChange]);
+    clearStalePreview();
+    if (previewBlockedPhase(phase)) {
+      return;
+    }
+    const handle = window.setTimeout(() => {
+      void refresh();
+    }, 350);
+    return () => window.clearTimeout(handle);
+    // Spot + bet + edit fields that reshape the public tree / memory plan.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    phase,
+    draft.boardText,
+    draft.oopRange,
+    draft.ipRange,
+    draft.pot,
+    draft.stack,
+    draft.oopBets,
+    draft.ipBets,
+    draft.oopRaises,
+    draft.ipRaises,
+    draft.oopFlop,
+    draft.ipFlop,
+    draft.oopTurn,
+    draft.ipTurn,
+    draft.oopRiver,
+    draft.ipRiver,
+    draft.oopFlopRaises,
+    draft.ipFlopRaises,
+    draft.oopTurnRaises,
+    draft.ipTurnRaises,
+    draft.oopRiverRaises,
+    draft.ipRiverRaises,
+    draft.oopDonk,
+    draft.oopFlopDonk,
+    draft.oopTurnDonk,
+    draft.oopRiverDonk,
+    draft.donkFlop,
+    draft.donkTurn,
+    draft.donkRiver,
+    draft.mergeThresholdPct,
+    draft.potCap,
+    draft.noThreeBet,
+    draft.allInThreshold,
+    draft.maxRaises,
+    draft.memoryMib,
+    draft.threads,
+    draft.treeEdits,
+    draft.iterations,
+    draft.accuracy,
+    draft.timeLimit,
+    draft.algorithm,
+    draft.samples,
+    draft.rakeRate,
+    draft.rakeCap,
+    draft.useIcm,
+    draft.icmStacks,
+    draft.icmPayouts,
+    draft.incentives,
+    draft.edgeTags,
+  ]);
 
   const appendEdit = (line: string) => {
     if (draft.treeEdits.includes(line)) {
@@ -334,8 +459,8 @@ export function TreeLineEditor({
   }, [preview]);
 
   return (
-    <section className="build-section tree-editor" data-span="2" aria-label="Advanced tree">
-      {!hideMemoryStrip && plan ? (
+    <section className="build-section tree-editor" data-span="2">
+      {plan ? (
         <MemoryPlanStrip plan={plan} pot={draft.pot} stack={draft.stack} />
       ) : null}
       <div className="panel-title-row">

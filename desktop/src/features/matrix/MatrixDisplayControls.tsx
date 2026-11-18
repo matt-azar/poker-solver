@@ -1,15 +1,9 @@
-import { useEffect, useMemo } from "react";
-import { actionSizePotBasis } from "../../domain/actionHistory";
-import {
-  formatActionDisplay,
-  formatActionNavLabel,
-} from "../../domain/betSizes";
+import { useEffect } from "react";
 import {
   type MatrixCellOverlay,
   useMatrixDisplayStore,
 } from "../../domain/matrixDisplay";
 import { analysisPayloadNeedsAutoload } from "../../domain/setup/identity";
-import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
 
 const OVERLAYS: Array<{ id: MatrixCellOverlay; label: string }> = [
@@ -42,10 +36,6 @@ export function MatrixDisplayControls() {
   const currentNode = useStudyStore((s) => s.currentNode);
   const solutionId = useStudyStore((s) => s.solutionId);
   const matrixMode = useStudyStore((s) => s.matrixMode);
-  const actionFilter = useStudyStore((s) => s.actionFilter);
-  const status = useStudyStore((s) => s.status);
-  const draft = useStudyStore((s) => s.draft);
-  const betSizeDisplay = useSettingsStore((s) => s.settings.betSizeDisplay);
 
   const nodeId = currentNode?.node_id ?? null;
   // Skip chance/terminal; treat missing kind with actions as a decision (fixtures).
@@ -76,31 +66,6 @@ export function MatrixDisplayControls() {
       (!nodeValues.node_id || nodeValues.node_id === nodeId) &&
       (!nodeValues.solution_id || nodeValues.solution_id === solutionId),
   );
-
-  const pot = actionSizePotBasis(
-    currentNode,
-    Number(status?.pot ?? draft.pot ?? 0),
-  );
-  const toCall = Number(currentNode?.to_call ?? 0);
-  const filterMetric = useMemo(() => {
-    if (
-      actionFilter == null ||
-      !currentNode?.actions ||
-      actionFilter < 0 ||
-      actionFilter >= currentNode.actions.length
-    ) {
-      return null;
-    }
-    const label = currentNode.actions[actionFilter]!;
-    const compact = formatActionDisplay(
-      label,
-      pot,
-      betSizeDisplay === "chips" ? "chips" : "pot",
-      { toCall },
-    ).primary;
-    const readable = formatActionNavLabel(label, pot, { toCall });
-    return { compact, readable };
-  }, [actionFilter, currentNode, pot, toCall, betSizeDisplay]);
 
   // Overlay / EV mode requests funnel through the Study selection owner. Always-on
   // warm already covers decision nodes; this catches overlay toggles and retries
@@ -143,7 +108,7 @@ export function MatrixDisplayControls() {
       </button>
       <div className="matrix-display-controls__overlay">
         <span className="matrix-display-controls__label muted" id="matrix-overlay-label">
-          Numbers
+          Overlay
         </span>
         <select
           className="matrix-display-controls__select"
@@ -170,14 +135,6 @@ export function MatrixDisplayControls() {
       >
         Color
       </button>
-      {filterMetric && prefs.cellOverlay === "none" ? (
-        <span
-          className="matrix-display-controls__filter-metric muted tabular"
-          title={`${filterMetric.readable} frequency in each cell`}
-        >
-          {filterMetric.compact} %
-        </span>
-      ) : null}
       {equityPending ? <span className="muted tabular">Eq…</span> : null}
       {evPending ? <span className="muted tabular">EV…</span> : null}
     </div>

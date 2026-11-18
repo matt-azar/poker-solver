@@ -1,5 +1,4 @@
 import { usePhoneDemoLayout } from "../../demo/phoneLayout";
-import { useStudyStore } from "../../state/studyStore";
 import { ActionSummary } from "./ActionSummary";
 import { ComboInspector } from "./ComboInspector";
 
@@ -11,22 +10,8 @@ import { ComboInspector } from "./ComboInspector";
  */
 export function StudyDetailPanel() {
   const phoneDemo = usePhoneDemoLayout();
-  const inspectorWidth = useStudyStore((s) => s.layout.inspectorWidth);
   return (
-    <aside
-      className="study-detail-panel"
-      aria-label="Study detail"
-      style={
-        phoneDemo
-          ? undefined
-          : {
-              flex: `0 0 ${inspectorWidth}px`,
-              width: inspectorWidth,
-              minWidth: inspectorWidth,
-              maxWidth: inspectorWidth,
-            }
-      }
-    >
+    <aside className="study-detail-panel" aria-label="Study detail">
       <ActionSummary />
       {phoneDemo ? null : <ComboInspector />}
     </aside>

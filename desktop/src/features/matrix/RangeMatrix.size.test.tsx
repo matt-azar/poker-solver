@@ -26,6 +26,7 @@ class ResizeObserverMock {
 vi.stubGlobal("ResizeObserver", ResizeObserverMock);
 
 const { useStudyStore } = await import("../../state/studyStore");
+const { clampDockHeight } = await import("../../state/layoutStore");
 const { RangeMatrix, fitAspectSize, SINGLE_MATRIX_WIDTH_OVER_HEIGHT } = await import(
   "./RangeMatrix"
 );
@@ -178,9 +179,7 @@ describe("RangeMatrix single-layout size", () => {
     expect(grid.style.height).toBe("100%");
   });
 
-  it("keeps the column-split handle full-height when the analysis dock is open", () => {
-    // Dock is in-flow under the matrix (Categories must not overlay the 13×13),
-    // so the resize handle no longer insets by dock height.
+  it("stops the column split at the top of the open analysis dock", () => {
     useStudyStore.setState({
       layout: {
         ...useStudyStore.getState().layout,
@@ -191,10 +190,10 @@ describe("RangeMatrix single-layout size", () => {
     });
     render(<RangeMatrix />);
     const handle = screen.getByRole("separator", { name: "Resize range matrix" });
-    expect(handle.style.bottom).toBe("");
+    expect(handle.style.bottom).toBe(`${clampDockHeight(240)}px`);
   });
 
-  it("keeps the column-split handle full-height when the dock is closed", () => {
+  it("lets the column split fill the upper pane when the dock is closed", () => {
     useStudyStore.setState({
       layout: {
         ...useStudyStore.getState().layout,

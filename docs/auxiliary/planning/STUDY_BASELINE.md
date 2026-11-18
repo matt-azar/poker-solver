@@ -7,7 +7,7 @@ Product entry points: Zig `solver-engine` and the Study UI (`desktop/`). Living 
 ## In place
 
 - Shared flop, turn, and river public tree in the Zig Session
-- Conditional action EV, check-down equity on the **Range equity** dock tab (+ buckets and an OOP vs IP chart), made-hand categories on five-card boards, flop/turn draw and backdoor tags. There is no Runouts tab.
+- Conditional action EV, check-down equity (+ buckets and an OOP vs IP chart), made-hand categories on five-card boards, flop/turn draw and backdoor tags. There is no Runouts tab.
 - Stop-and-keep, pause/continue, accuracy and wall-clock stopping (Acc walls are not cutover blockers)
 - Versioned PSOL save/open/continue. Save mode is **Study only** (`study_only: true`) or **Resumable checkpoint**. In-app solutions catalogue (folders) plus Library recent list; street-config templates; named range presets; Build betting-tree catalogue
 - Precomputed public Study demo (`desktop/src/demo/README.md`) and a limited five-card river browser beta (`services/river-beta/README.md`). Neither replaces the Windows Tauri product.

@@ -7,8 +7,6 @@ import {
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
-import { actionSizePotBasis } from "../../domain/actionHistory";
-import { useMatrixKeyboard, type MatrixFocusCell } from "./useMatrixKeyboard";
 import { mapActionColors } from "../../domain/actionColors";
 import {
   type AggregatedHandCell,
@@ -31,10 +29,6 @@ import {
   weightFillFraction,
 } from "../../domain/matrixDisplay";
 import {
-  ACTION_FILTER_DIM_THRESHOLD,
-  actionShareMeetsFilter,
-} from "../../domain/matrixFilter";
-import {
   buildStrategyPaintSegments,
   type StrategyPaintSegment,
 } from "../../domain/strategyPaint";
@@ -46,6 +40,7 @@ import {
   type NodePayload,
 } from "../../domain/types";
 import { usePhoneDemoLayout } from "../../demo/phoneLayout";
+import { clampDockHeight } from "../../state/layoutStore";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
 import { useValueBluffsHighlightStore } from "../../state/valueBluffsHighlightStore";
@@ -202,6 +197,8 @@ export function RangeMatrix() {
   const displayPrefs = useMatrixDisplayStore((s) => s.prefs);
   const dualRange = useStudyStore((s) => s.layout.dualRange);
   const matrixWidth = useStudyStore((s) => s.layout.matrixWidth);
+  const lowerDockOpen = useStudyStore((s) => s.layout.lowerDock);
+  const lowerDockHeight = useStudyStore((s) => s.layout.lowerDockHeight);
   const setLayout = useStudyStore((s) => s.setLayout);
   const phoneDemo = usePhoneDemoLayout();
   const userWidth =
@@ -209,13 +206,6 @@ export function RangeMatrix() {
       ? matrixWidth
       : null;
   const stageRef = useRef<HTMLDivElement>(null);
-  const [focusCell, setFocusCell] = useState<MatrixFocusCell | null>(null);
-  const { onGridKeyDown } = useMatrixKeyboard({
-    selectedCell,
-    setSelectedCell,
-    focusCell,
-    setFocusCell,
-  });
   // Phone public demo: keep the 13×13 square and full-width.
   const aspectRatio = phoneDemo
     ? 1
@@ -267,17 +257,7 @@ export function RangeMatrix() {
   }, [equity, currentNode?.player]);
 
   const actions = currentNode?.actions;
-  const status = useStudyStore((s) => s.status);
-  const draft = useStudyStore((s) => s.draft);
-  const pot = actionSizePotBasis(
-    currentNode,
-    Number(status?.pot ?? draft.pot ?? 0),
-  );
-  const toCall = Number(currentNode?.to_call ?? 0);
-  const colors = useMemo(
-    () => mapActionColors(actions ?? [], { pot, toCall }),
-    [actions, pot, toCall],
-  );
+  const colors = useMemo(() => mapActionColors(actions ?? []), [actions]);
 
   const evScale = useMemo(() => {
     if (!currentNode || !nodeValues || nodeValues.pending) {
@@ -326,8 +306,6 @@ export function RangeMatrix() {
           className="range-matrix matrix-density range-matrix--no-axis"
           role="grid"
           aria-label={matrixAria}
-          tabIndex={0}
-          data-keyboard-nav="true"
           style={
             userWidth
               ? { width: "100%", height: "100%" }
@@ -336,14 +314,6 @@ export function RangeMatrix() {
                 : undefined
           }
           onMouseLeave={() => setHoverCell(null)}
-          onKeyDown={onGridKeyDown}
-          onFocus={() => {
-            if (!focusCell && selectedCell) {
-              setFocusCell(selectedCell);
-            } else if (!focusCell) {
-              setFocusCell({ row: 0, col: 0, text: `${RANKS[0]}${RANKS[0]}` });
-            }
-          }}
         >
           {RANKS.map((rowRank, row) => (
             <MatrixRow
@@ -354,7 +324,6 @@ export function RangeMatrix() {
               matrixMode={matrixMode}
               selectedCell={selectedCell}
               hoverCell={hoverCell}
-              focusCell={focusCell}
               actionFilter={actionFilter}
               valueBluffsHighlight={valueBluffsHighlight}
               currentNode={currentNode}
@@ -365,7 +334,6 @@ export function RangeMatrix() {
               displayPrefs={displayPrefs}
               setSelectedCell={setSelectedCell}
               setHoverCell={setHoverCell}
-              setFocusCell={setFocusCell}
             />
           ))}
         </div>
@@ -373,6 +341,11 @@ export function RangeMatrix() {
       {phoneDemo ? null : (
         <div
           className="resize-handle resize-handle--vertical range-matrix__resize"
+          style={
+            lowerDockOpen
+              ? { bottom: clampDockHeight(lowerDockHeight) }
+              : undefined
+          }
           onPointerDown={onResizePointerDown}
           role="separator"
           aria-orientation="vertical"
@@ -403,7 +376,6 @@ interface RowProps {
   matrixMode: MatrixMode;
   selectedCell: Selected | null;
   hoverCell: Selected | null;
-  focusCell: MatrixFocusCell | null;
   actionFilter: number | null;
   /** When non-null, dim matrix cells whose label is not in the set. */
   valueBluffsHighlight: ReadonlySet<string> | null;
@@ -415,7 +387,6 @@ interface RowProps {
   displayPrefs: DisplayPrefs;
   setSelectedCell: (cell: Selected | null) => void;
   setHoverCell: (cell: Selected | null) => void;
-  setFocusCell: (cell: MatrixFocusCell | null) => void;
 }
 
 function MatrixRow({
@@ -425,7 +396,6 @@ function MatrixRow({
   matrixMode,
   selectedCell,
   hoverCell,
-  focusCell,
   actionFilter,
   valueBluffsHighlight,
   currentNode,
@@ -436,7 +406,6 @@ function MatrixRow({
   displayPrefs,
   setSelectedCell,
   setHoverCell,
-  setFocusCell,
 }: RowProps) {
   return (
     <>
@@ -457,7 +426,6 @@ function MatrixRow({
         const empty = excluded;
         const selected = selectedCell?.row === row && selectedCell?.col === col;
         const hovered = hoverCell?.row === row && hoverCell?.col === col;
-        const focused = focusCell?.row === row && focusCell?.col === col;
 
         // Paint outputs. `segments` = shared strategy bars (passive → left).
         // `solid` = a single background (range weight, EV, or equity).
@@ -577,18 +545,14 @@ function MatrixRow({
           if (valueBluffsHighlight != null) {
             dimmed = !valueBluffsHighlight.has(text);
           } else if (actionFilter != null && cell.actionMass.length) {
-            // Selected action: dim cells below the visible cutoff; outline the rest.
+            // Selected action: dim cells that barely use it, outline the rest.
             // With no overlay, the sublabel becomes that action's share of the cell.
             const share =
               cell.marginalSum > 0
                 ? cell.actionMass[actionFilter] / cell.marginalSum
                 : 0;
-            const meets = actionShareMeetsFilter(
-              share,
-              ACTION_FILTER_DIM_THRESHOLD,
-            );
-            dimmed = !meets;
-            filtered = meets;
+            dimmed = share < 0.02;
+            filtered = share >= 0.02;
             if (showStrategy && displayPrefs.cellOverlay === "none") {
               sub = `${(share * 100).toFixed(0)}%`;
             }
@@ -621,12 +585,10 @@ function MatrixRow({
             type="button"
             className="matrix-cell"
             role="gridcell"
-            tabIndex={-1}
             data-empty={empty}
             data-excluded={excluded}
             data-selected={selected}
             data-hover={hovered}
-            data-focus={focused}
             data-dimmed={dimmed}
             data-filtered={filtered}
             data-partial-inclusion={partialInclusion}
@@ -647,11 +609,7 @@ function MatrixRow({
                   : undefined
             }
             onMouseEnter={() => setHoverCell({ row, col, text })}
-            onClick={() => {
-              const cell = { row, col, text };
-              setFocusCell(cell);
-              setSelectedCell(cell);
-            }}
+            onClick={() => setSelectedCell({ row, col, text })}
             title={title}
           >
             {/* Height fill: bars or the solid tint sit in a bottom-anchored box

@@ -15,7 +15,6 @@ import {
   type EquityChartPoint,
   type EquityHandRow,
 } from "../../domain/analysis";
-import { formatEquityPercent } from "../../domain/equity/validation";
 import { draftFromStudyNode } from "../../domain/equity/transfer";
 import { useEquityStore } from "../../state/equityStore";
 import { useStudyStore } from "../../state/studyStore";
@@ -211,7 +210,7 @@ function bandKey(lo: number, hi: number): string {
   return `${lo}:${hi}`;
 }
 
-/** Range equity and Categories panels for the Study lower dock. */
+/** Equity and Categories panels for the Study lower dock. */
 export function AnalysisDockPanel() {
   const categories = useStudyStore((s) => s.categories) as CategoryPayload | null;
   const equity = useStudyStore((s) => s.equity) as EquityPayload | null;
@@ -374,9 +373,9 @@ export function AnalysisDockPanel() {
     return (
       <div className="range-explorer">
         <div className="panel-title-row">
-          <h2 className="panel-title">Range equity</h2>
+          <h2 className="panel-title">Equity</h2>
           <div className="panel-title-actions">
-            <div className="seat-toggle" role="group" aria-label="Range equity seat">
+            <div className="seat-toggle" role="group" aria-label="Equity seat">
               <button
                 type="button"
                 className="toolbar-btn"
@@ -420,7 +419,7 @@ export function AnalysisDockPanel() {
             </button>
           </div>
         </div>
-        <p className="equity-note muted">Check-down equity as % of pot.</p>
+        <p className="equity-note muted">Equity (fraction of pot).</p>
         {transferMessage ? <p className="equity-note">{transferMessage}</p> : null}
         {!equity ? null : equity.pending ? (
           <p className="empty-hint">Loading…</p>
@@ -430,19 +429,19 @@ export function AnalysisDockPanel() {
               <div>
                 <span className="muted">OOP avg</span>
                 <strong className="tabular">
-                  {formatEquityPercent(equity.oop_equity)}
+                  {equity.oop_equity == null ? "—" : equity.oop_equity.toFixed(4)}
                 </strong>
               </div>
               <div>
                 <span className="muted">IP avg</span>
                 <strong className="tabular">
-                  {formatEquityPercent(equity.ip_equity)}
+                  {equity.ip_equity == null ? "—" : equity.ip_equity.toFixed(4)}
                 </strong>
               </div>
               <div>
                 <span className="muted">Filter avg</span>
                 <strong className="tabular">
-                  {formatEquityPercent(filteredView.averageEquity)}
+                  {filteredView.averageEquity == null ? "—" : filteredView.averageEquity.toFixed(4)}
                 </strong>
               </div>
             </div>

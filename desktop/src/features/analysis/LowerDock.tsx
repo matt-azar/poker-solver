@@ -12,7 +12,7 @@ import { ValueBluffsPanel } from "./ValueBluffsPanel";
 
 const TABS = [
   { id: "line-cards", label: "Compare runouts" },
-  { id: "equity", label: "Range equity" },
+  { id: "equity", label: "Equity" },
   { id: "categories", label: "Categories" },
   { id: "value-bluffs", label: "Value / Bluffs" },
 ] as const;

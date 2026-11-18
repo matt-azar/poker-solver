@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 /**
  * Live matrix highlight while an analysis dock filter is active
- * (Value / Bluffs, Range equity bands, or Categories).
+ * (Value / Bluffs, Equity bands, or Categories).
  * `null` = inactive (no dimming). A Set (possibly empty) = dim cells whose
  * hand-class label is not in the set.
  */

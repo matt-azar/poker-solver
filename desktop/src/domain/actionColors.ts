@@ -1,7 +1,5 @@
 /** Stable colors keyed by canonical action identity, not array position. */
 
-import { parseSizedAction, sizeChipsForPotTag } from "./betSizes";
-
 const FOLD = "#5B7FA8";
 const CHECK_CALL = "#3F8F6B";
 const BET_RAISE = ["#C9843F", "#C45C3A", "#B33A32", "#8E1F28", "#6B1420"];
@@ -11,13 +9,6 @@ export interface ActionColorMap {
   byIndex: string[];
   byLabel: Record<string, string>;
   legend: Array<{ label: string; color: string }>;
-}
-
-export interface MapActionColorsOptions {
-  /** Current pot chips — when set, aggressive colors key off pot% (stable across sibling sizes). */
-  pot?: number;
-  /** Facing amount for `Raise to` pot% identity. */
-  toCall?: number;
 }
 
 function normalizeLabel(label: string): string {
@@ -63,69 +54,6 @@ export function actionIdentity(label: string): string {
   return lower;
 }
 
-/**
- * Aggressive palette index from pot percent.
- * Keeps e.g. 75% pot on the same swatch whether or not a 33% size is also present.
- */
-export function betColorIndexFromPotPct(pct: number): number {
-  if (!(pct > 0) || !Number.isFinite(pct)) {
-    return 0;
-  }
-  if (pct <= 30) {
-    return 0;
-  }
-  if (pct <= 45) {
-    return 1;
-  }
-  if (pct <= 65) {
-    return 2;
-  }
-  if (pct <= 90) {
-    return 3;
-  }
-  return Math.min(BET_RAISE.length - 1, 4);
-}
-
-function potPctForLabel(label: string, pot: number, toCall: number): number | null {
-  if (!(pot > 0)) {
-    return null;
-  }
-  const parsed = parseSizedAction(label);
-  if (!parsed || parsed.kind === "call") {
-    return null;
-  }
-  const sizeChips = sizeChipsForPotTag(parsed, toCall);
-  if (!(sizeChips >= 0) || !Number.isFinite(sizeChips)) {
-    return null;
-  }
-  return Math.round((sizeChips / pot) * 100);
-}
-
-/** Pot-fraction identity (`bet:p75`) when pot is known; else chip/label identity. */
-export function actionIdentityWithPot(
-  label: string,
-  pot?: number,
-  toCall = 0,
-): string {
-  const base = actionIdentity(label);
-  if (
-    base === "fold" ||
-    base === "check" ||
-    base === "call" ||
-    base === "all-in" ||
-    pot == null ||
-    !(pot > 0)
-  ) {
-    return base;
-  }
-  const pct = potPctForLabel(label, pot, toCall);
-  if (pct == null) {
-    return base;
-  }
-  const kind = base.startsWith("raise") ? "raise" : "bet";
-  return `${kind}:p${pct}`;
-}
-
 function colorForIdentity(id: string, betRank: number): string {
   if (id === "all-in") {
     return ALL_IN;
@@ -139,20 +67,11 @@ function colorForIdentity(id: string, betRank: number): string {
   return BET_RAISE[Math.min(Math.max(betRank, 0), BET_RAISE.length - 1)];
 }
 
-export function mapActionColors(
-  actions: string[],
-  options: MapActionColorsOptions = {},
-): ActionColorMap {
-  const pot = options.pot;
-  const toCall = Number(options.toCall ?? 0);
-  const usePot = pot != null && pot > 0;
+export function mapActionColors(actions: string[]): ActionColorMap {
   const normalized = actions.map(normalizeLabel);
-  const identities = normalized.map((label) =>
-    usePot ? actionIdentityWithPot(label, pot, toCall) : actionIdentity(label),
-  );
+  const identities = normalized.map(actionIdentity);
 
-  // Without pot: rank by size magnitude among present actions.
-  // With pot: index from pot% so 75% keeps its color when smaller sizes appear/disappear.
+  // Assign aggressive size colors by size magnitude (stable across array order).
   const aggressiveIds = [
     ...new Set(
       identities.filter(
@@ -161,22 +80,13 @@ export function mapActionColors(
     ),
   ].sort((left, right) => {
     const num = (id: string) => {
-      const match = id.match(/:p?([\d.]+)/);
+      const match = id.match(/:([\d.]+)/);
       return match ? Number(match[1]) : Number.POSITIVE_INFINITY;
     };
     const delta = num(left) - num(right);
     return delta !== 0 ? delta : left.localeCompare(right);
   });
-  const betRank = new Map(
-    aggressiveIds.map((id, index) => {
-      if (usePot) {
-        const match = id.match(/:p([\d.]+)/);
-        const pct = match ? Number(match[1]) : NaN;
-        return [id, betColorIndexFromPotPct(pct)] as const;
-      }
-      return [id, index] as const;
-    }),
-  );
+  const betRank = new Map(aggressiveIds.map((id, index) => [id, index]));
 
   const byLabel: Record<string, string> = {};
   const byIndex: string[] = [];
@@ -184,7 +94,7 @@ export function mapActionColors(
   const seen = new Set<string>();
 
   normalized.forEach((label, index) => {
-    const id = identities[index]!;
+    const id = identities[index];
     const color = colorForIdentity(id, betRank.get(id) ?? 0);
     byLabel[label] = color;
     byIndex.push(color);

@@ -282,11 +282,6 @@ export function ActionHistory() {
       ? "fold"
       : "showdown"
     : undefined;
-  // Root with empty/sparse history: keep the strip short so the matrix sits higher.
-  const sparseHistory =
-    !currentNode ||
-    (streetGroups.length <= 1 &&
-      (streetGroups[0]?.steps.length ?? 0) <= 1);
 
   const renderedSteps = useMemo(() => {
     const rows: Array<{
@@ -334,9 +329,8 @@ export function ActionHistory() {
     <section
       className="path-nav"
       data-empty={currentNode ? "false" : "true"}
-      data-sparse={sparseHistory ? "true" : "false"}
       style={
-        currentNode && !sparseHistory
+        currentNode
           ? {
               height: layout.historyHeight,
             }

@@ -41,7 +41,7 @@ describe("LowerDock tabs", () => {
     });
     render(<LowerDock />);
     expect(screen.getByRole("tab", { name: "Compare runouts" })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "Range equity" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Equity" })).toBeTruthy();
     expect(screen.queryByRole("tab", { name: "Runouts" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Runouts" })).toBeNull();
   });
@@ -60,10 +60,10 @@ describe("LowerDock tabs", () => {
     });
     render(<LowerDock />);
     expect(screen.queryByRole("tab", { name: "Compare runouts" })).toBeNull();
-    expect(screen.getByRole("tab", { name: "Range equity" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Equity" })).toBeTruthy();
   });
 
-  it("sends a stored Runouts tab to Range equity", async () => {
+  it("sends a stored Runouts tab to Equity", async () => {
     useStudyStore.setState({
       // Legacy persisted tab id — migrate off after dock removal.
       analysisTab: "runouts" as "equity",
@@ -79,6 +79,6 @@ describe("LowerDock tabs", () => {
       expect(useStudyStore.getState().analysisTab).toBe("equity");
     });
     expect(screen.queryByRole("tab", { name: "Runouts" })).toBeNull();
-    expect(screen.getByRole("tab", { name: "Range equity" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Equity" })).toBeTruthy();
   });
 });
