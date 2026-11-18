@@ -53,6 +53,75 @@ fn preferIpcThreadScheduling() void {
     _ = SetThreadPriority(GetCurrentThread(), 1);
 }
 
+/// Latch cooperative cancel for the live begin/train identity (if any) and always
+/// request Session stop. Parent stdin EOF must not join remaining train first.
+fn signalParentGoneCancel(state: *dispatch.HostState) void {
+    var active_copy: ?[]u8 = null;
+    defer if (active_copy) |jid| state.allocator.free(jid);
+    {
+        state.job_mu.lock();
+        defer state.job_mu.unlock();
+        if (state.active_job_id) |jid| {
+            active_copy = state.allocator.dupe(u8, jid) catch null;
+        }
+    }
+    if (active_copy) |jid| {
+        // Best-effort: OOM on cancel map must not skip requestStop below.
+        state.cancelJob(jid) catch {};
+    }
+    // Always latch stop — covers begin mid-compile and races that clear active id.
+    state.session.requestStop();
+}
+
+/// Best-effort fail-once for outstanding request_ids (stdout may already be closed).
+/// Snapshot under lock; do not hold pending_mu across writeReply (stdout_mu) or a
+/// worker untrack can deadlock against this exit path.
+fn failPendingOnParentExit(state: *dispatch.HostState) void {
+    state.pending_mu.lock();
+    const snapshot = state.allocator.dupe([]u8, state.pending.items) catch {
+        state.pending_mu.unlock();
+        return;
+    };
+    state.pending_mu.unlock();
+    defer state.allocator.free(snapshot);
+
+    for (snapshot) |rid| {
+        var err_reply = ipc.makeErrorReply(state.allocator, rid, null, "exit", "sidecar_exit", "solver-engine exiting") catch continue;
+        defer err_reply.deinit();
+        // Intentional best-effort (Tiger Style Phase 2): stdout may already
+        // be closed on process exit; do not escalate into a panic here.
+        state.writeReply(err_reply) catch {};
+    }
+}
+
+/// Parent stdin EOF / disappearance: cooperative stop, wake waiters, wind down
+/// checkpoint I/O, then join every owned worker (audit §8 / Single prompt §7).
+/// Prefer stop-then-join over hanging on remaining train after the parent is gone.
+/// Uses only public HostState / Session entry points (no dispatch.zig edits).
+pub fn shutdownOnParentEof(state: *dispatch.HostState) void {
+    signalParentGoneCancel(state);
+
+    // Supersede in-flight analysis/preview so workers exit without finishing
+    // obsolete walks (same intent as prior exit defer bumpAnalysisGen).
+    _ = state.bumpAnalysisGen();
+    _ = state.bumpPreviewGen();
+
+    // Equity calculator: cancel queued/current work and wake the worker CV.
+    state.equity_jobs.shutdown();
+
+    // Wake IPC waiters before joining long workers.
+    failPendingOnParentExit(state);
+
+    // Checkpoint I/O: join Save/Open so atomic replace can finish coherently
+    // rather than racing process teardown mid-stream.
+    state.joinIo();
+
+    state.joinBegin();
+    state.joinTrain();
+    state.joinAnalysis();
+    state.joinPreview();
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -68,19 +137,8 @@ pub fn main() !void {
 
     var state = try dispatch.HostState.init(allocator, launch_id);
     defer {
-        // Fail pending on exit (D1). Supersede in-flight analysis so workers exit.
-        _ = state.bumpAnalysisGen();
-        state.joinBegin();
-        state.joinTrain();
-        state.joinAnalysis();
-        state.joinIo();
-        for (state.pending.items) |rid| {
-            var err_reply = ipc.makeErrorReply(allocator, rid, null, "exit", "sidecar_exit", "solver-engine exiting") catch continue;
-            defer err_reply.deinit();
-            // Intentional best-effort (Tiger Style Phase 2): stdout may already
-            // be closed on process exit; do not escalate into a panic here.
-            state.writeReply(err_reply) catch {};
-        }
+        // stdin EOF / loop break lands here: stop first, then join (audit §8).
+        shutdownOnParentEof(&state);
         state.deinit();
         std.debug.print("solver-engine exiting\n", .{});
     }
@@ -244,6 +302,70 @@ pub fn main() !void {
     }
 }
 
+/// Tiny check-only river used by parent-EOF shutdown tests (no stdout IPC).
+const eof_test_river_config =
+    \\street-config 1
+    \\board Ah Kh Qh Jh 2c
+    \\pot 100
+    \\stack 100
+    \\oop-range AsQs:1,2d2h:1
+    \\ip-range AsQs:1,2d2h:1
+    \\oop-river-bets 
+    \\ip-river-bets 
+    \\first-to-act 0
+    \\max-raises 0
+    \\allow-three-bet 1
+    \\all-in-threshold 0
+    \\pot-cap 0
+    \\rake-rate 0
+    \\rake-cap 0
+    \\memory-mib 256
+    \\threads 1
+    \\
+;
+
+/// Background train that honors Session.requestStop (mirrors product trainWorker
+/// without writing an admit frame to stdout — which deadlocks under zig test).
+const EofTrainSim = struct {
+    state: *dispatch.HostState,
+    iterations: i32,
+    saw_stop_before_exit: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+
+    fn run(self: *@This()) void {
+        defer {
+            self.state.train_running.store(false, .release);
+            self.state.bumpStatusGeneration();
+            self.state.job_mu.lock();
+            if (self.state.active_job_id) |jid| {
+                self.state.allocator.free(jid);
+                self.state.active_job_id = null;
+            }
+            self.state.job_mu.unlock();
+        }
+        self.state.session.trainGated(self.iterations, 0, 1, -1) catch {};
+        if (self.state.session.stop_requested.load(.acquire)) {
+            self.saw_stop_before_exit.store(true, .release);
+        }
+    }
+};
+
+fn spawnEofTrainSim(state: *dispatch.HostState, sim: *EofTrainSim) !void {
+    state.session.clearControlFlags();
+    try state.setActiveJob("eof-train");
+    state.train_running.store(true, .release);
+    state.train_thread = try std.Thread.spawn(.{}, EofTrainSim.run, .{sim});
+}
+
+fn waitUntilTrainRunning(state: *dispatch.HostState, timeout_ns: u64) !void {
+    const start = std.time.nanoTimestamp();
+    while (!state.train_running.load(.acquire)) {
+        if (@as(u64, @intCast(std.time.nanoTimestamp() - start)) > timeout_ns) return error.Timeout;
+        std.Thread.yield() catch {};
+    }
+    // Confirmed admission: active job is registered and worker is live.
+    try std.testing.expect(state.matchesActiveJob("eof-train"));
+}
+
 test {
     _ = ipc;
     _ = dispatch;
@@ -253,4 +375,131 @@ test {
     _ = compare_json;
     _ = strategy_edits_json;
     _ = linkedLayers;
+}
+
+test "parent EOF signals stop and cancels active job before join" {
+    // Audit §8: stdin-EOF must requestStop / cancel before joining train.
+    var state = try dispatch.HostState.init(std.testing.allocator, "eof-signal");
+    defer state.deinit();
+    try state.session.begin(eof_test_river_config);
+    try state.session.train(1);
+
+    var sim = EofTrainSim{ .state = &state, .iterations = 50_000 };
+    try spawnEofTrainSim(&state, &sim);
+    try waitUntilTrainRunning(&state, 2 * std.time.ns_per_s);
+
+    // Capture analysis gen so we can prove supersession on EOF.
+    const gen_before = state.analysis_gen.load(.acquire);
+    const preview_before = state.preview_gen.load(.acquire);
+
+    const t0 = std.time.nanoTimestamp();
+    shutdownOnParentEof(&state);
+    const elapsed_ns: u64 = @intCast(std.time.nanoTimestamp() - t0);
+
+    try std.testing.expect(state.session.stop_requested.load(.acquire));
+    try std.testing.expect(state.isCancelled("eof-train") or !state.matchesActiveJob("eof-train"));
+    try std.testing.expect(sim.saw_stop_before_exit.load(.acquire));
+    try std.testing.expect(state.train_thread == null);
+    try std.testing.expect(!state.train_running.load(.acquire));
+    try std.testing.expect(state.analysis_gen.load(.acquire) > gen_before);
+    try std.testing.expect(state.preview_gen.load(.acquire) > preview_before);
+    // Cooperative stop must not wait out a 50k-iter train (product hang risk).
+    try std.testing.expect(elapsed_ns < 5 * std.time.ns_per_s);
+}
+
+test "Stop-first then parent EOF join is prompt on Linux" {
+    // Matched pair with EOF-after-admission: explicit Stop then EOF join should be
+    // near-idle (audit: ~1 ms Stop-first vs hung join without cooperative stop).
+    if (builtin.os.tag != .linux) return;
+    var state = try dispatch.HostState.init(std.testing.allocator, "eof-stop-first");
+    defer state.deinit();
+    try state.session.begin(eof_test_river_config);
+    try state.session.train(1);
+
+    var sim = EofTrainSim{ .state = &state, .iterations = 50_000 };
+    try spawnEofTrainSim(&state, &sim);
+    try waitUntilTrainRunning(&state, 2 * std.time.ns_per_s);
+
+    // Explicit Stop path (same latch cancel uses).
+    try state.cancelJob("eof-train");
+    state.session.requestStop();
+    const stop_wait_start = std.time.nanoTimestamp();
+    while (state.train_running.load(.acquire)) {
+        if (@as(u64, @intCast(std.time.nanoTimestamp() - stop_wait_start)) > 5 * std.time.ns_per_s) {
+            return error.Timeout;
+        }
+        std.Thread.yield() catch {};
+    }
+
+    const t0 = std.time.nanoTimestamp();
+    shutdownOnParentEof(&state);
+    const elapsed_ns: u64 = @intCast(std.time.nanoTimestamp() - t0);
+
+    try std.testing.expect(state.train_thread == null);
+    // Already-stopped workers: join should be prompt (generous bound for CI noise).
+    try std.testing.expect(elapsed_ns < 1 * std.time.ns_per_s);
+}
+
+test "parent EOF after confirmed admission stops faster than full train" {
+    // EOF-after-admission without a prior Stop still cooperatively cancels.
+    if (builtin.os.tag != .linux) return;
+    var state = try dispatch.HostState.init(std.testing.allocator, "eof-after-admit");
+    defer state.deinit();
+    try state.session.begin(eof_test_river_config);
+    try state.session.train(1);
+
+    var sim = EofTrainSim{ .state = &state, .iterations = 50_000 };
+    try spawnEofTrainSim(&state, &sim);
+    try waitUntilTrainRunning(&state, 2 * std.time.ns_per_s);
+    // Let a few iterations start so this is post-admission, not pre-train.
+    std.Thread.sleep(5 * std.time.ns_per_ms);
+
+    const t0 = std.time.nanoTimestamp();
+    shutdownOnParentEof(&state);
+    const elapsed_ns: u64 = @intCast(std.time.nanoTimestamp() - t0);
+
+    try std.testing.expect(sim.saw_stop_before_exit.load(.acquire));
+    try std.testing.expect(state.train_thread == null);
+    try std.testing.expect(elapsed_ns < 5 * std.time.ns_per_s);
+    // Trained count must be far below the 50k target if stop was honored.
+    state.session.mu.lock();
+    const trained: i32 = if (state.session.training) |*tr| tr.trained else state.session.last_committed_trained;
+    state.session.mu.unlock();
+    try std.testing.expect(trained < 50_000);
+}
+
+test "parent EOF shuts down equity jobs and joins idle workers" {
+    var state = try dispatch.HostState.init(std.testing.allocator, "eof-equity-io");
+    defer state.deinit();
+
+    // Build a minimal equity request; enqueue transfers ownership to the manager.
+    var request = equity_jobs.JobRequest{
+        .client_revision = try std.testing.allocator.dupe(u8, "eof"),
+        .options = .{ .method = .exact, .seed = 1 },
+    };
+    var transferred = false;
+    errdefer if (!transferred) request.deinit(std.testing.allocator);
+    request.players = try std.testing.allocator.alloc(equity_jobs.PlayerSpec, 2);
+    for (request.players) |*p| p.* = .{ .id = &.{}, .range_text = &.{} };
+    request.players[0] = .{
+        .id = try std.testing.allocator.dupe(u8, "p1"),
+        .range_text = try std.testing.allocator.dupe(u8, "AsAd"),
+    };
+    request.players[1] = .{
+        .id = try std.testing.allocator.dupe(u8, "p2"),
+        .range_text = try std.testing.allocator.dupe(u8, "KcKd"),
+    };
+    request.board = try std.testing.allocator.alloc(poker_engine.poker.card.Card, 0);
+    request.dead_cards = try std.testing.allocator.alloc(poker_engine.poker.card.Card, 0);
+
+    _ = try state.equity_jobs.enqueue(request);
+    transferred = true;
+    try state.track("pending-eof");
+    shutdownOnParentEof(&state);
+
+    try std.testing.expect(state.io_thread == null);
+    try std.testing.expect(state.begin_thread == null);
+    try std.testing.expect(state.train_thread == null);
+    try std.testing.expect(state.analysis_thread == null);
+    try std.testing.expect(state.preview_thread == null);
 }
