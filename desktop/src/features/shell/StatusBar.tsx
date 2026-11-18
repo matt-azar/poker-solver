@@ -85,6 +85,14 @@ export function StatusBar({
     phase === "pause_requested" ||
     phase === "stop_requested";
 
+  const secondaryTitle = [
+    `Time ${metrics.runtime}`,
+    `ETA ${metrics.eta}`,
+    `Rate ${metrics.rate}`,
+    `Job ${metrics.job}`,
+    `Mem ${metrics.memory}`,
+  ].join(" · ");
+
   return (
     <footer className="status-bar" role="status" aria-live="polite">
       <span className="status-dot" data-state={connection} title={connection} />
@@ -159,18 +167,23 @@ export function StatusBar({
           Iter {metrics.iterations}
           {metrics.target !== "—" ? `/${metrics.target}` : ""}
         </span>
-        <span title="Active engine job id">Job {metrics.job}</span>
-        <span title="Elapsed solve time">Time {metrics.runtime}</span>
-        <span title="Estimated time to stop criterion (iterations or accuracy)">
-          ETA {metrics.eta}
-        </span>
-        <span title="Iterations per second">Rate {metrics.rate}</span>
         <span title="Root OOP EV (chips)">EV {metrics.ev}</span>
         <span title="Pio Accuracy (NashConv/2) in chips and % of pot">
           Acc {metrics.nash}
         </span>
-        <span title="Engine-allocated heap">Mem {metrics.memory}</span>
       </span>
+      <details className="status-bar__more">
+        <summary title={secondaryTitle}>More</summary>
+        <div className="status-bar__more-panel tabular" role="group" aria-label="More solve metrics">
+          <span title="Elapsed solve time">Time {metrics.runtime}</span>
+          <span title="Estimated time to stop criterion (iterations or accuracy)">
+            ETA {metrics.eta}
+          </span>
+          <span title="Iterations per second">Rate {metrics.rate}</span>
+          <span title="Active engine job id">Job {metrics.job}</span>
+          <span title="Engine-allocated heap">Mem {metrics.memory}</span>
+        </div>
+      </details>
     </footer>
   );
 }
