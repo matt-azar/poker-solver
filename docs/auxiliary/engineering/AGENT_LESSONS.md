@@ -373,7 +373,7 @@ On historically flop/turn-only pages, river `/values` returned 400 until river E
 
 Check-down equity is a **fraction of the pot** under check-down. Strategic EV is **root-centered chips**. Keep units and labels separate (`docs/EQUITY.md`, `StreetNodeEquity`).
 
-Made-hand **categories** (when present) are category mass on a **five-card** board — not draws/backdoors unless explicitly implemented.
+**Categories:** five-card boards → exclusive made-hand mass; flop/turn → multi-label draw/backdoor tags (`model: "draws"`, `exclusive: false`). Host `categories` JSON lists names parallel to seat fractions. Do not reintroduce the Zig cutover `available=false` short-board banner.
 
 ### Memory budget
 

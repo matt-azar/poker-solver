@@ -33,6 +33,27 @@ describe("analysis helpers", () => {
     ]);
   });
 
+  it("maps flop/turn draws model rows (multi-label names)", () => {
+    const view = categorySeatView(
+      ["flush draw", "oesd", "gutshot", "backdoor flush", "backdoor straight"],
+      {
+        defined: true,
+        total_mass: 2,
+        fractions: [0.5, 0, 0.25, 0.5, 0],
+        mass: [1, 0, 0.5, 1, 0],
+      },
+    );
+    expect(view.rows.map((row) => row.name)).toEqual([
+      "Flush Draw",
+      "OESD",
+      "Gutshot",
+      "Backdoor Flush",
+      "Backdoor Straight",
+    ]);
+    expect(view.rows[0]?.fraction).toBeCloseTo(0.5, 12);
+    expect(view.rows[2]?.mass).toBeCloseTo(0.5, 12);
+  });
+
   it("title-cases category labels and keeps OESD as an acronym", () => {
     expect(formatCategoryLabel("flush draw")).toBe("Flush Draw");
     expect(formatCategoryLabel("oesd")).toBe("OESD");

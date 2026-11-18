@@ -1,4 +1,4 @@
-//! Study Categories at a selected node: reach-weighted made-hand composition.
+//! Study Categories at a selected node: reach-weighted made-hand or draw composition.
 const std = @import("std");
 const card = @import("../poker/card.zig");
 const range_mod = @import("../poker/range.zig");
@@ -36,7 +36,7 @@ fn boardThroughNode(
 }
 
 /// Reach-weighted category composition on the board through `node_index`.
-/// Five-card boards return made-hand mass; shorter boards return available=false.
+/// Five-card boards return made-hand mass; flop/turn return multi-label draws.
 pub fn categoriesAtNode(
     allocator: std.mem.Allocator,
     game: compile.CompiledGame,

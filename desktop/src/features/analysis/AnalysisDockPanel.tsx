@@ -380,7 +380,6 @@ export function AnalysisDockPanel() {
   }
 
   const model = categories?.model ?? "made-hand";
-  const exclusive = categories?.exclusive !== false;
   const title =
     model === "draws" ? "Draw / Backdoor Categories" : "Made-hand Categories";
   const categoriesAvailable = studyIpcFeatureAvailable("categories");
@@ -431,39 +430,32 @@ export function AnalysisDockPanel() {
       ) : categories.available === false ? (
         <p className="empty-hint">{categories.reason || "Not available on this board."}</p>
       ) : (
-        <>
-          <p className="equity-note muted">
-            {exclusive
-              ? "Exclusive made-hand buckets. Fractions of positive reach mass."
-              : "Multi-label draws/backdoors. A combo may count in more than one row."}
-          </p>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Category</th>
-                <th>Mass</th>
-                <th>%</th>
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th>Mass</th>
+              <th>%</th>
+            </tr>
+          </thead>
+          <tbody>
+            {categoryView.rows.map((row) => (
+              <tr key={row.name}>
+                <td>{row.name}</td>
+                <td className="tabular">
+                  {row.mass == null ? "—" : row.mass.toFixed(3)}
+                </td>
+                <td className="tabular">
+                  <span
+                    className="category-bar"
+                    style={{ width: `${Math.min(100, row.fraction * 100)}%` }}
+                  />{" "}
+                  {(row.fraction * 100).toFixed(1)}%
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {categoryView.rows.map((row) => (
-                <tr key={row.name}>
-                  <td>{row.name}</td>
-                  <td className="tabular">
-                    {row.mass == null ? "—" : row.mass.toFixed(3)}
-                  </td>
-                  <td className="tabular">
-                    <span
-                      className="category-bar"
-                      style={{ width: `${Math.min(100, row.fraction * 100)}%` }}
-                    />{" "}
-                    {(row.fraction * 100).toFixed(1)}%
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
+            ))}
+          </tbody>
+        </table>
       )}
     </div>
   );
