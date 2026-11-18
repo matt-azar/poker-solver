@@ -1,11 +1,14 @@
-# Quick IPC race / bug-case probes (test sidecar).
+# Quick IPC race / bug-case probes + Rust supervisor gate.
 # Separate from zig.yml flop/memory benches and windows-installer.yml E2E.
+# Packaged WebView delayed-reply concurrency runs in windows-installer-e2e
+# (Stage DelayedReply → scripts/desktop/ipc-async-acceptance.ps1).
 name: IPC Race Probes
 
 on:
   push:
     branches: [main, zig-rewrite]
     paths:
+      # Harness / cases
       - "desktop/ipc-test-sidecar/**"
       - "desktop/src/platform/ipcAcceptance.*"
       - "scripts/desktop/ipc_race_replay.py"
@@ -14,6 +17,13 @@ on:
       - "scripts/desktop/ipc_test_sidecar.py"
       - "scripts/desktop/ipc-async-acceptance.*"
       - ".github/workflows/ipc-race-probes.yml"
+      # Production IPC surfaces (audit §7 — were omitted while harness was included)
+      - "desktop/src-tauri/src/solver_engine.rs"
+      - "desktop/src-tauri/src/solver_admission.rs"
+      - "desktop/src-tauri/src/solver_ipc.rs"
+      - "host/src/dispatch.zig"
+      - "desktop/src/engine/transport.ts"
+      - "desktop/src/engine/client.ts"
   pull_request:
     paths:
       - "desktop/ipc-test-sidecar/**"
@@ -24,6 +34,12 @@ on:
       - "scripts/desktop/ipc_test_sidecar.py"
       - "scripts/desktop/ipc-async-acceptance.*"
       - ".github/workflows/ipc-race-probes.yml"
+      - "desktop/src-tauri/src/solver_engine.rs"
+      - "desktop/src-tauri/src/solver_admission.rs"
+      - "desktop/src-tauri/src/solver_ipc.rs"
+      - "host/src/dispatch.zig"
+      - "desktop/src/engine/transport.ts"
+      - "desktop/src/engine/client.ts"
   workflow_dispatch:
 
 concurrency:
@@ -32,19 +48,33 @@ concurrency:
 
 jobs:
   # Pass bar: existing hold-EV probe — Status + Cancel while values withheld.
+  # Plus Rust connection-supervisor lib tests (ipc-test-sidecar / python fallback).
   # UI A→B stale-EV is browser/Playwright (not this job). No flop/memory benches.
+  # Packaged WebView concurrency: windows-installer.yml Stage DelayedReply.
   ipc-race-windows:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Rust cache (Tauri lib + test sidecar)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            desktop/src-tauri -> target
+            desktop/ipc-test-sidecar -> target
+          shared-key: ipc-race-windows
+
       - name: Build ipc-test-sidecar
         working-directory: desktop/ipc-test-sidecar
         run: cargo build --release
+
+      - name: Rust supervisor tests (solver_engine module)
+        working-directory: desktop/src-tauri
+        run: "cargo test --lib solver_engine:: -- --nocapture"
 
       - name: Run hold-EV Status+Cancel probe (pass bar)
         shell: pwsh
@@ -71,16 +101,40 @@ jobs:
   # Same quick probes on Linux for faster PR signal (still not flop/memory benches).
   ipc-race-linux:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Tauri Linux system deps (lib tests link webkit/gtk)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            pkg-config
+
+      - name: Rust cache (Tauri lib + test sidecar)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            desktop/src-tauri -> target
+            desktop/ipc-test-sidecar -> target
+          shared-key: ipc-race-linux
+
       - name: Build ipc-test-sidecar
         working-directory: desktop/ipc-test-sidecar
         run: cargo build --release
+
+      - name: Rust supervisor tests (solver_engine module)
+        working-directory: desktop/src-tauri
+        run: "cargo test --lib solver_engine:: -- --nocapture"
 
       - name: Run hold-EV Status+Cancel probe (pass bar)
         run: |

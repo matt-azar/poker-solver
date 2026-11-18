@@ -1,7 +1,7 @@
 # Copyright (c) Matt Azar. UNLICENSED — no license is granted.
 <#
 .SYNOPSIS
-  Windows installer E2E — Stage A (WebView drive) + Stage B (river PSOL round-trip).
+  Windows installer E2E — Stage A/B + DelayedReply (packaged WebView concurrency).
 
 .DESCRIPTION
   Smokes the exact NSIS artifact under test (PR installer when this job runs
@@ -21,11 +21,21 @@
     (kill+re-ensure sidecar) → reopen PSOL → assert strategy restored →
     close; sidecar exits. Same last-step + diagnostics rules.
 
+  Stage DelayedReply (-Stage DelayedReply):
+    Silent-install, then scripts/desktop/ipc-async-acceptance.ps1 against the
+    installed Study UI with ipc-test-sidecar (STUDY_IPC_ACCEPTANCE=1). Proves
+    packaged WebView → Tauri → pipe under a held/delayed values reply
+    (Status + Cancel still complete). Does not replace Stage B.
+
+  Future stages (YAML hooks in windows-installer.yml; product STUDY_INSTALLER_E2E
+  targets not on main yet — do not invent a second engine):
+    BlockedWrite, NormalClosePending, StaleCallAfterReconnect.
+
 .PARAMETER InstallerExe
   Path to the NSIS setup exe (artifact from windows-installer job).
 
 .PARAMETER Stage
-  A (default) or B.
+  A (default), B, or DelayedReply.
 
 .PARAMETER OutDir
   Logs + failure diagnostic bundle directory.
@@ -42,7 +52,7 @@
 param(
   [Parameter(Mandatory = $true)]
   [string]$InstallerExe,
-  [ValidateSet("A", "B")]
+  [ValidateSet("A", "B", "DelayedReply", "BlockedWrite", "NormalClosePending", "StaleCallAfterReconnect")]
   [string]$Stage = "A",
   [string]$OutDir = "",
   [int]$StudyReadySec = 0,
@@ -68,7 +78,9 @@ $ResultPath = Join-Path $OutDir "e2e-result.json"
 $LastStepPath = Join-Path $OutDir "last-completed-step.txt"
 
 if ($StudyReadySec -le 0) {
-  if ($Stage -eq "B") { $StudyReadySec = 180 } else { $StudyReadySec = 120 }
+  if ($Stage -eq "B") { $StudyReadySec = 180 }
+  elseif ($Stage -eq "DelayedReply") { $StudyReadySec = 180 }
+  else { $StudyReadySec = 120 }
 }
 
 if (-not $InstallDir) {
@@ -269,6 +281,17 @@ $studyProc = $null
 $resolvedInstallDir = $null
 
 try {
+  # Named future targets (YAML hooks in windows-installer.yml use if: false until
+  # product STUDY_INSTALLER_E2E boot hooks land on other IPC tracks).
+  if ($Stage -in @("BlockedWrite", "NormalClosePending", "StaleCallAfterReconnect")) {
+    $envHint = switch ($Stage) {
+      "BlockedWrite" { "STUDY_INSTALLER_E2E=stage-blocked-write" }
+      "NormalClosePending" { "STUDY_INSTALLER_E2E=stage-normal-close-pending" }
+      "StaleCallAfterReconnect" { "STUDY_INSTALLER_E2E=stage-stale-call-after-reconnect" }
+    }
+    throw "Stage $Stage harness stub only — awaiting product hook $envHint (ipc-audit-2026-11-18 §7). Flip the windows-installer.yml if:false guard after the WebView boot path exists."
+  }
+
   $result.interactiveSession = [ordered]@{
     sessionId = (Get-Process -Id $PID).SessionId
     userName  = $env:USERNAME
@@ -339,68 +362,89 @@ try {
   }
   Start-Sleep -Seconds 1
 
-  $stageEnv = if ($Stage -eq "B") { "stage-b" } else { "stage-a" }
-  $stageBGate = if ($Stage -eq "B") { "1" } else { "0" }
-  $psolPath = Join-Path $OutDir "stage-b-roundtrip.psol"
-
-  Write-E2E "Launching Study for Stage $Stage WebView drive: $studyExe"
-  $psi = New-Object System.Diagnostics.ProcessStartInfo
-  $psi.FileName = $studyExe
-  $psi.UseShellExecute = $false
-  $psi.WorkingDirectory = $resolvedInstallDir
-  foreach ($entry in [System.Environment]::GetEnvironmentVariables().GetEnumerator()) {
-    try { $psi.Environment[$entry.Key] = [string]$entry.Value } catch {}
-  }
-  $psi.Environment["STUDY_INSTALLER_E2E"] = $stageEnv
-  $psi.Environment["STUDY_INSTALLER_E2E_STAGE_B"] = $stageBGate
-  if ($Stage -eq "B") {
-    $psi.Environment["STUDY_INSTALLER_E2E_PSOL"] = $psolPath
-  }
-  if ($env:HOLDEM_STUDY_DIAGNOSTICS_DIR) {
-    $psi.Environment["HOLDEM_STUDY_DIAGNOSTICS_DIR"] = $env:HOLDEM_STUDY_DIAGNOSTICS_DIR
-  }
-
-  $studyProc = New-Object System.Diagnostics.Process
-  $studyProc.StartInfo = $psi
-  if (-not $studyProc.Start()) {
-    throw "Failed to start Study process"
-  }
-  $result.studyPid = $studyProc.Id
-  Set-LastStep "study-launched" $result
-  Write-E2E "Study PID=$($studyProc.Id); waiting up to ${StudyReadySec}s for WebView Stage $Stage exit"
-
-  if (-not $studyProc.WaitForExit($StudyReadySec * 1000)) {
-    try { $studyProc.Kill() } catch {}
-    throw "Stage $Stage timed out after ${StudyReadySec}s (Study did not exit; WebView hook may not have run — is this build's installer missing STUDY_INSTALLER_E2E?)"
-  }
-  $result.studyExitCode = $studyProc.ExitCode
-  Write-E2E "Study exited code=$($studyProc.ExitCode)"
-  if ($studyProc.ExitCode -ne 0) {
-    throw "Stage $Stage WebView probe FAILED (Study exit $($studyProc.ExitCode)); see engine.log / diagnostics (lastCompletedStep=study-launched until WebView reports)"
-  }
-  if ($Stage -eq "B") {
-    Set-LastStep "stage-b-webview-pass" $result
+  if ($Stage -eq "DelayedReply") {
+    # Packaged WebView concurrency via existing ipc-async-acceptance.ps1
+    # (STUDY_IPC_ACCEPTANCE + ipc-test-sidecar). Not STUDY_INSTALLER_E2E.
+    $acceptScript = Join-Path $Root "scripts\desktop\ipc-async-acceptance.ps1"
+    if (-not (Test-Path -LiteralPath $acceptScript)) {
+      throw "Missing ipc-async-acceptance.ps1 at $acceptScript"
+    }
+    Write-E2E "Stage DelayedReply: ipc-async-acceptance.ps1 -StudyExe $studyExe"
+    Set-LastStep "delayed-reply-webview-launch" $result
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $acceptScript `
+      -StudyExe $studyExe `
+      -TimeoutSec $StudyReadySec
+    if ($LASTEXITCODE -ne 0) {
+      throw "Stage DelayedReply ipc-async-acceptance FAILED (exit $LASTEXITCODE)"
+    }
+    Set-LastStep "delayed-reply-webview-pass" $result
+    $result.ok = $true
+    $result.remaining = @()
+    Write-E2E "STAGE DelayedReply PASS"
   } else {
-    Set-LastStep "webview-control-proven" $result
-  }
-  $studyProc = $null
+    $stageEnv = if ($Stage -eq "B") { "stage-b" } else { "stage-a" }
+    $stageBGate = if ($Stage -eq "B") { "1" } else { "0" }
+    $psolPath = Join-Path $OutDir "stage-b-roundtrip.psol"
 
-  $exitDeadline = (Get-Date).AddSeconds($SidecarExitSec)
-  while ((Get-Date) -lt $exitDeadline) {
+    Write-E2E "Launching Study for Stage $Stage WebView drive: $studyExe"
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $studyExe
+    $psi.UseShellExecute = $false
+    $psi.WorkingDirectory = $resolvedInstallDir
+    foreach ($entry in [System.Environment]::GetEnvironmentVariables().GetEnumerator()) {
+      try { $psi.Environment[$entry.Key] = [string]$entry.Value } catch {}
+    }
+    $psi.Environment["STUDY_INSTALLER_E2E"] = $stageEnv
+    $psi.Environment["STUDY_INSTALLER_E2E_STAGE_B"] = $stageBGate
+    if ($Stage -eq "B") {
+      $psi.Environment["STUDY_INSTALLER_E2E_PSOL"] = $psolPath
+    }
+    if ($env:HOLDEM_STUDY_DIAGNOSTICS_DIR) {
+      $psi.Environment["HOLDEM_STUDY_DIAGNOSTICS_DIR"] = $env:HOLDEM_STUDY_DIAGNOSTICS_DIR
+    }
+
+    $studyProc = New-Object System.Diagnostics.Process
+    $studyProc.StartInfo = $psi
+    if (-not $studyProc.Start()) {
+      throw "Failed to start Study process"
+    }
+    $result.studyPid = $studyProc.Id
+    Set-LastStep "study-launched" $result
+    Write-E2E "Study PID=$($studyProc.Id); waiting up to ${StudyReadySec}s for WebView Stage $Stage exit"
+
+    if (-not $studyProc.WaitForExit($StudyReadySec * 1000)) {
+      try { $studyProc.Kill() } catch {}
+      throw "Stage $Stage timed out after ${StudyReadySec}s (Study did not exit; WebView hook may not have run — is this build's installer missing STUDY_INSTALLER_E2E?)"
+    }
+    $result.studyExitCode = $studyProc.ExitCode
+    Write-E2E "Study exited code=$($studyProc.ExitCode)"
+    if ($studyProc.ExitCode -ne 0) {
+      throw "Stage $Stage WebView probe FAILED (Study exit $($studyProc.ExitCode)); see engine.log / diagnostics (lastCompletedStep=study-launched until WebView reports)"
+    }
+    if ($Stage -eq "B") {
+      Set-LastStep "stage-b-webview-pass" $result
+    } else {
+      Set-LastStep "webview-control-proven" $result
+    }
+    $studyProc = $null
+
+    $exitDeadline = (Get-Date).AddSeconds($SidecarExitSec)
+    while ((Get-Date) -lt $exitDeadline) {
+      $left = @(Get-SidecarProcesses $resolvedInstallDir)
+      if ($left.Count -eq 0) { break }
+      Start-Sleep -Milliseconds 500
+    }
     $left = @(Get-SidecarProcesses $resolvedInstallDir)
-    if ($left.Count -eq 0) { break }
-    Start-Sleep -Milliseconds 500
-  }
-  $left = @(Get-SidecarProcesses $resolvedInstallDir)
-  if ($left.Count -gt 0) {
-    $pids = ($left | ForEach-Object { $_.ProcessId }) -join ", "
-    throw "solver-engine still running after Stage $Stage Study exit (PIDs $pids)"
-  }
-  Set-LastStep "sidecar-exited" $result
+    if ($left.Count -gt 0) {
+      $pids = ($left | ForEach-Object { $_.ProcessId }) -join ", "
+      throw "solver-engine still running after Stage $Stage Study exit (PIDs $pids)"
+    }
+    Set-LastStep "sidecar-exited" $result
 
-  $result.ok = $true
-  $result.remaining = @()
-  Write-E2E "STAGE $Stage PASS"
+    $result.ok = $true
+    $result.remaining = @()
+    Write-E2E "STAGE $Stage PASS"
+  }
 }
 catch {
   $result.ok = $false

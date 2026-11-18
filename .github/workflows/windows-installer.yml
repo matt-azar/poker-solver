@@ -34,6 +34,7 @@ on:
       - "cli/**"
       - "scripts/zig/**"
       - "scripts/desktop/windows-installer-e2e.ps1"
+      - "scripts/desktop/ipc-async-acceptance.*"
       - "scripts/debug/**"
       - ".github/workflows/windows-installer.yml"
       - ".github/workflows/windows-installer-release.yml"
@@ -50,6 +51,7 @@ on:
       - "cli/**"
       - "scripts/zig/**"
       - "scripts/desktop/windows-installer-e2e.ps1"
+      - "scripts/desktop/ipc-async-acceptance.*"
       - "scripts/debug/**"
       - ".github/workflows/windows-installer.yml"
       - ".github/workflows/windows-installer-release.yml"
@@ -280,19 +282,23 @@ jobs:
           Get-ChildItem -Recurse desktop/src-tauri/target/release/bundle -ErrorAction SilentlyContinue |
             Select-Object FullName, Length
 
-  # Stage A + Stage B against the exact NSIS artifact from the preceding job
-  # (PR installer when available; else the same-commit workflow artifact).
+  # Stage A + Stage B + DelayedReply against the exact NSIS artifact from the
+  # preceding job (PR installer when available; else the same-commit artifact).
+  # Stage B keeps the real-engine river Save/reopen path.
   windows-installer-e2e:
     needs: windows-installer
     if: github.ref_type != 'tag'
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     permissions:
       contents: read
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (DelayedReply builds ipc-test-sidecar)
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Download NSIS installer artifact
         uses: actions/download-artifact@v4
@@ -361,6 +367,76 @@ jobs:
             throw "windows-installer-e2e.ps1 Stage B failed (exit $LASTEXITCODE)"
           }
 
+      # Audit §7: packaged WebView delayed-reply concurrency (existing probe).
+      - name: Installer E2E Stage DelayedReply (WebView concurrency / held values)
+        shell: pwsh
+        env:
+          HOLDEM_STUDY_DIAGNOSTICS_DIR: ${{ runner.temp }}\holdem-study-e2e-diagnostics-delayed-reply
+        run: |
+          $ErrorActionPreference = "Stop"
+          $out = Join-Path $env:RUNNER_TEMP "windows-installer-e2e-delayed-reply"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:HOLDEM_STUDY_DIAGNOSTICS_DIR | Out-Null
+          & "$env:GITHUB_WORKSPACE\scripts\desktop\windows-installer-e2e.ps1" `
+            -InstallerExe "${{ steps.resolve.outputs.installer }}" `
+            -Stage DelayedReply `
+            -OutDir $out
+          if ($LASTEXITCODE -ne 0) {
+            $stepFile = Join-Path $out "last-completed-step.txt"
+            if (Test-Path $stepFile) {
+              Write-Host "FAIL lastCompletedStep=$(Get-Content $stepFile -Raw)"
+            }
+            throw "windows-installer-e2e.ps1 Stage DelayedReply failed (exit $LASTEXITCODE)"
+          }
+
+      # ------------------------------------------------------------------
+      # TODO(ipc-audit-2026-11-18 §7 Support and CI): enable when product
+      # STUDY_INSTALLER_E2E hooks land (other tracks). Do not invent a second
+      # engine. Named future targets for windows-installer-e2e.ps1:
+      #
+      #   -Stage BlockedWrite
+      #       Genuinely blocked stdin write under deadline (not stop-reading
+      #       soft timeout alone). Product: STUDY_INSTALLER_E2E=stage-blocked-write
+      #       and/or Rust supervisor blocked-write probe wired here.
+      #
+      #   -Stage NormalClosePending
+      #       Normal window Close while work is pending (not process::exit
+      #       test-exit hook). Product: STUDY_INSTALLER_E2E=stage-normal-close-pending
+      #
+      #   -Stage StaleCallAfterReconnect
+      #       Stale invoke after kill+ensure must not settle on the new launch.
+      #       Product: STUDY_INSTALLER_E2E=stage-stale-call-after-reconnect
+      #
+      # Flip `if: false` → true (or drop the guard) once ValidateSet + WebView
+      # boot hooks exist. Keep Stage B river Save/reopen above.
+      # ------------------------------------------------------------------
+      - name: "TODO Installer E2E Stage BlockedWrite (awaiting product hook)"
+        if: false
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\scripts\desktop\windows-installer-e2e.ps1" `
+            -InstallerExe "${{ steps.resolve.outputs.installer }}" `
+            -Stage BlockedWrite `
+            -OutDir "$env:RUNNER_TEMP\windows-installer-e2e-blocked-write"
+
+      - name: "TODO Installer E2E Stage NormalClosePending (awaiting product hook)"
+        if: false
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\scripts\desktop\windows-installer-e2e.ps1" `
+            -InstallerExe "${{ steps.resolve.outputs.installer }}" `
+            -Stage NormalClosePending `
+            -OutDir "$env:RUNNER_TEMP\windows-installer-e2e-normal-close-pending"
+
+      - name: "TODO Installer E2E Stage StaleCallAfterReconnect (awaiting product hook)"
+        if: false
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\scripts\desktop\windows-installer-e2e.ps1" `
+            -InstallerExe "${{ steps.resolve.outputs.installer }}" `
+            -Stage StaleCallAfterReconnect `
+            -OutDir "$env:RUNNER_TEMP\windows-installer-e2e-stale-call-after-reconnect"
+
       - name: Upload installer E2E logs / diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -369,6 +445,8 @@ jobs:
           path: |
             ${{ runner.temp }}/windows-installer-e2e-a/**
             ${{ runner.temp }}/windows-installer-e2e-b/**
+            ${{ runner.temp }}/windows-installer-e2e-delayed-reply/**
             ${{ runner.temp }}/holdem-study-e2e-diagnostics/**
             ${{ runner.temp }}/holdem-study-e2e-diagnostics-b/**
+            ${{ runner.temp }}/holdem-study-e2e-diagnostics-delayed-reply/**
           if-no-files-found: warn
