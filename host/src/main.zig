@@ -101,9 +101,9 @@ fn failPendingOnParentExit(state: *dispatch.HostState) void {
 pub fn shutdownOnParentEof(state: *dispatch.HostState) void {
     signalParentGoneCancel(state);
 
-    // Supersede in-flight analysis/preview so workers exit without finishing
-    // obsolete walks (same intent as prior exit defer bumpAnalysisGen).
-    _ = state.bumpAnalysisGen();
+    // Supersede in-flight analysis/preview so the persistent pools exit without
+    // finishing obsolete walks (per-metric gens + latest-draft preview).
+    state.supersedeAllAnalysis();
     _ = state.bumpPreviewGen();
 
     // Equity calculator: cancel queued/current work and wake the worker CV.
@@ -138,6 +138,7 @@ pub fn main() !void {
     var state = try dispatch.HostState.init(allocator, launch_id);
     defer {
         // stdin EOF / loop break lands here: stop first, then join (audit §8).
+        // shutdownOnParentEof supersedes analysis/preview pool gens before joins.
         shutdownOnParentEof(&state);
         state.deinit();
         std.debug.print("solver-engine exiting\n", .{});
@@ -388,8 +389,11 @@ test "parent EOF signals stop and cancels active job before join" {
     try spawnEofTrainSim(&state, &sim);
     try waitUntilTrainRunning(&state, 2 * std.time.ns_per_s);
 
-    // Capture analysis gen so we can prove supersession on EOF.
-    const gen_before = state.analysis_gen.load(.acquire);
+    // Capture per-metric analysis gens + preview gen so EOF supersession is visible.
+    var analysis_gens_before: [state.analysis_kind_gen.len]u64 = undefined;
+    for (&analysis_gens_before, &state.analysis_kind_gen) |*out, *gen| {
+        out.* = gen.load(.acquire);
+    }
     const preview_before = state.preview_gen.load(.acquire);
 
     const t0 = std.time.nanoTimestamp();
@@ -401,7 +405,9 @@ test "parent EOF signals stop and cancels active job before join" {
     try std.testing.expect(sim.saw_stop_before_exit.load(.acquire));
     try std.testing.expect(state.train_thread == null);
     try std.testing.expect(!state.train_running.load(.acquire));
-    try std.testing.expect(state.analysis_gen.load(.acquire) > gen_before);
+    for (analysis_gens_before, &state.analysis_kind_gen) |before, *gen| {
+        try std.testing.expect(gen.load(.acquire) > before);
+    }
     try std.testing.expect(state.preview_gen.load(.acquire) > preview_before);
     // Cooperative stop must not wait out a 50k-iter train (product hang risk).
     try std.testing.expect(elapsed_ns < 5 * std.time.ns_per_s);
@@ -500,6 +506,9 @@ test "parent EOF shuts down equity jobs and joins idle workers" {
     try std.testing.expect(state.io_thread == null);
     try std.testing.expect(state.begin_thread == null);
     try std.testing.expect(state.train_thread == null);
-    try std.testing.expect(state.analysis_thread == null);
-    try std.testing.expect(state.preview_thread == null);
+    // Persistent analysis/preview pools are joined and cleared on EOF.
+    try std.testing.expect(state.analysis_worker == null);
+    try std.testing.expect(state.preview_worker == null);
+    try std.testing.expectEqual(@as(u32, 0), state.analysis_live_workers.load(.acquire));
+    try std.testing.expectEqual(@as(u32, 0), state.preview_live_workers.load(.acquire));
 }

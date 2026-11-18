@@ -1,5 +1,6 @@
 //! Map IPC ops onto the app Session. Cancel fails pending jobs (D1).
 const std = @import("std");
+const builtin = @import("builtin");
 const poker_app = @import("poker_app");
 const poker_engine = @import("poker_engine");
 const ipc = @import("ipc.zig");
@@ -34,6 +35,29 @@ const BeginTask = struct {
 };
 
 const AnalysisKind = enum { values, equity, node, categories, line_card_report, value_bluffs_post_call };
+const analysis_kind_count = @typeInfo(AnalysisKind).@"enum".fields.len;
+
+/// Bound the host analysis queue (IPC audit §5 / Single prompt §4).
+const max_analysis_queue: usize = 8;
+
+/// Navigation (`node`) preempts metrics; reports are lowest priority.
+fn analysisKindPriority(kind: AnalysisKind) u8 {
+    return switch (kind) {
+        .node => 0,
+        .values, .equity => 1,
+        .categories => 2,
+        .line_card_report, .value_bluffs_post_call => 3,
+    };
+}
+
+fn analysisKindIndex(kind: AnalysisKind) usize {
+    return @intFromEnum(kind);
+}
+
+fn hashNodeId(node_id: ?[]const u8) u64 {
+    const text = node_id orelse "";
+    return std.hash.Wyhash.hash(0, text);
+}
 
 const AnalysisTask = struct {
     state: *HostState,
@@ -43,7 +67,30 @@ const AnalysisTask = struct {
     body_json: []u8,
     kind: AnalysisKind,
     gen: u64,
+    /// Coalesce identity: launch is implicit (HostState-scoped).
+    solution_id: u64,
+    policy_revision: u64,
+    node_id_hash: u64,
+    priority: u8,
+    /// Set when a queued task is dropped (coalesce / bound / shutdown).
+    aborted: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 };
+
+fn analysisTasksSameKey(a: *const AnalysisTask, b: *const AnalysisTask) bool {
+    return a.kind == b.kind and
+        a.solution_id == b.solution_id and
+        a.policy_revision == b.policy_revision and
+        a.node_id_hash == b.node_id_hash;
+}
+
+fn freeAnalysisTask(task: *AnalysisTask) void {
+    const allocator = task.state.allocator;
+    allocator.free(task.request_id);
+    if (task.job_id) |j| allocator.free(j);
+    allocator.free(task.op);
+    allocator.free(task.body_json);
+    allocator.destroy(task);
+}
 
 const IoKind = enum { save, open };
 
@@ -70,7 +117,18 @@ const PreviewTask = struct {
     config: []u8,
     kind: PreviewKind,
     gen: u64,
+    /// Set when a queued draft is replaced by a newer one (latest-draft policy).
+    aborted: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 };
+
+fn freePreviewTask(task: *PreviewTask) void {
+    const allocator = task.state.allocator;
+    allocator.free(task.request_id);
+    if (task.job_id) |j| allocator.free(j);
+    allocator.free(task.op);
+    allocator.free(task.config);
+    allocator.destroy(task);
+}
 
 pub const HostState = struct {
     allocator: std.mem.Allocator,
@@ -88,22 +146,34 @@ pub const HostState = struct {
     /// Flop/turn compile off the stdin loop so Study can poll `status` (ZR-120).
     begin_thread: ?std.Thread = null,
     begin_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    /// ZR-151 / ZR-171: values/equity/node/categories off the stdin loop so Stop/status stay live.
-    analysis_thread: ?std.Thread = null,
-    /// Superseded analysis workers kept joinable (never detach). Bounded; joined on teardown.
-    analysis_orphans: std.ArrayList(std.Thread),
+    /// Persistent analysis worker + bounded coalesce queue (IPC audit §5).
+    analysis_mu: std.Thread.Mutex = .{},
+    analysis_cv: std.Thread.Condition = .{},
+    analysis_worker: ?std.Thread = null,
+    analysis_worker_stop: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    analysis_queue: std.ArrayList(*AnalysisTask),
+    analysis_current: ?*AnalysisTask = null,
     analysis_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    /// Bumped on each new analysis request; older workers reply `superseded`.
-    analysis_gen: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    /// Per-metric generations — independent metrics do not invalidate each other.
+    analysis_kind_gen: [analysis_kind_count]std.atomic.Value(u64) = .{std.atomic.Value(u64).init(0)} ** analysis_kind_count,
+    /// Observability for Study sessions (live workers / retained queue depth).
+    analysis_live_workers: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+    analysis_queued: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
     /// ZR-151: Save/Open off the stdin loop (large PSOL must not starve control).
     io_thread: ?std.Thread = null,
     io_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    /// Tree preview / plan_memory off the stdin loop (large draft compile).
-    preview_thread: ?std.Thread = null,
-    preview_orphans: std.ArrayList(std.Thread),
+    /// Persistent preview worker; queue depth 1 = latest draft only.
+    preview_mu: std.Thread.Mutex = .{},
+    preview_cv: std.Thread.Condition = .{},
+    preview_worker: ?std.Thread = null,
+    preview_worker_stop: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    preview_latest: ?*PreviewTask = null,
+    preview_current: ?*PreviewTask = null,
     preview_running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    /// Bumped on each new preview; older workers reply `superseded`.
+    /// Bumped on each new preview; older drafts reply `superseded`.
     preview_gen: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    preview_live_workers: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+    preview_queued: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
     /// Active begin/train job id (owned); null when idle. Stop/Pause match this only.
     active_job_id: ?[]u8 = null,
     job_mu: std.Thread.Mutex = .{},
@@ -131,8 +201,7 @@ pub const HostState = struct {
             .launch_id = try allocator.dupe(u8, launch_id),
             .pending = std.ArrayList([]u8).init(allocator),
             .cancelled_jobs = std.StringHashMap(void).init(allocator),
-            .analysis_orphans = std.ArrayList(std.Thread).init(allocator),
-            .preview_orphans = std.ArrayList(std.Thread).init(allocator),
+            .analysis_queue = std.ArrayList(*AnalysisTask).init(allocator),
             .equity_jobs = equity_jobs.Manager.init(allocator),
         };
     }
@@ -158,8 +227,7 @@ pub const HostState = struct {
         self.job_mu.unlock();
         self.clearLastError();
         self.pending.deinit();
-        self.analysis_orphans.deinit();
-        self.preview_orphans.deinit();
+        self.analysis_queue.deinit();
     }
 
     /// Clear sticky async-train error (fresh admit / successful train / teardown).
@@ -194,15 +262,27 @@ pub const HostState = struct {
     }
 
     pub fn joinAnalysis(self: *HostState) void {
-        if (self.analysis_thread) |t| {
-            t.join();
-            self.analysis_thread = null;
+        self.analysis_worker_stop.store(true, .release);
+        self.supersedeAllAnalysis();
+        self.analysis_mu.lock();
+        self.analysis_cv.broadcast();
+        const t = self.analysis_worker;
+        self.analysis_mu.unlock();
+        if (t) |thread| {
+            thread.join();
+            self.analysis_mu.lock();
+            self.analysis_worker = null;
+            self.analysis_mu.unlock();
         }
-        // Every superseded worker must be joined before HostState free (audit #3).
-        for (self.analysis_orphans.items) |t| {
-            t.join();
-        }
-        self.analysis_orphans.clearRetainingCapacity();
+        self.analysis_worker_stop.store(false, .release);
+        // Drain any tasks left after the worker exited.
+        self.analysis_mu.lock();
+        defer self.analysis_mu.unlock();
+        self.dropQueuedAnalysisLocked("sidecar_exit");
+        self.analysis_current = null;
+        self.analysis_running.store(false, .release);
+        self.analysis_live_workers.store(0, .release);
+        self.analysis_queued.store(0, .release);
     }
 
     pub fn joinIo(self: *HostState) void {
@@ -213,14 +293,30 @@ pub const HostState = struct {
     }
 
     pub fn joinPreview(self: *HostState) void {
-        if (self.preview_thread) |t| {
-            t.join();
-            self.preview_thread = null;
+        self.preview_worker_stop.store(true, .release);
+        _ = self.bumpPreviewGen();
+        self.preview_mu.lock();
+        self.preview_cv.broadcast();
+        const t = self.preview_worker;
+        self.preview_mu.unlock();
+        if (t) |thread| {
+            thread.join();
+            self.preview_mu.lock();
+            self.preview_worker = null;
+            self.preview_mu.unlock();
         }
-        for (self.preview_orphans.items) |t| {
-            t.join();
+        self.preview_worker_stop.store(false, .release);
+        self.preview_mu.lock();
+        defer self.preview_mu.unlock();
+        if (self.preview_latest) |task| {
+            self.replyPreviewDropped(task, "sidecar_exit");
+            freePreviewTask(task);
+            self.preview_latest = null;
         }
-        self.preview_orphans.clearRetainingCapacity();
+        self.preview_current = null;
+        self.preview_running.store(false, .release);
+        self.preview_live_workers.store(0, .release);
+        self.preview_queued.store(0, .release);
     }
 
     pub fn bumpPreviewGen(self: *HostState) u64 {
@@ -231,62 +327,143 @@ pub const HostState = struct {
         return self.preview_gen.load(.acquire) == gen;
     }
 
-    /// Park the prior preview join handle without blocking the stdin loop.
-    pub fn retirePreviewThread(self: *HostState) void {
-        if (self.preview_thread) |old_t| {
-            self.preview_orphans.ensureUnusedCapacity(1) catch {
-                // Bound exceeded: join synchronously so we never detach.
-                old_t.join();
-                self.preview_thread = null;
-                return;
-            };
-            self.preview_orphans.appendAssumeCapacity(old_t);
-            self.preview_thread = null;
-        }
+    fn replyPreviewDropped(self: *HostState, task: *PreviewTask, message: []const u8) void {
+        task.aborted.store(true, .release);
+        self.untrack(task.request_id);
+        var err_reply = ipc.makeErrorReply(
+            self.allocator,
+            task.request_id,
+            task.job_id,
+            task.op,
+            "superseded",
+            message,
+        ) catch return;
+        defer err_reply.deinit();
+        self.writeReply(err_reply) catch {};
     }
 
     pub fn beginOrTrainBusy(self: *HostState) bool {
         return self.begin_running.load(.acquire) or self.train_running.load(.acquire);
     }
 
-    /// Mint a generation for a new analysis request; older gens are superseded.
-    pub fn bumpAnalysisGen(self: *HostState) u64 {
-        return self.analysis_gen.fetchAdd(1, .acq_rel) + 1;
+    /// Mint a generation for one analysis metric; sibling metrics stay current.
+    pub fn bumpAnalysisGen(self: *HostState, kind: AnalysisKind) u64 {
+        const idx = analysisKindIndex(kind);
+        return self.analysis_kind_gen[idx].fetchAdd(1, .acq_rel) + 1;
     }
 
-    pub fn analysisGenCurrent(self: *HostState, gen: u64) bool {
-        return self.analysis_gen.load(.acquire) == gen;
-    }
-
-    /// Park the prior analysis join handle without detach and **without joining
-    /// on the stdin/admission path** in the common case. Joining here would stall
-    /// cancel/status while EV finishes (ZR-151 / stop-close smoke).
-    /// `joinAnalysis` / teardown joins the full orphan set. Gen checks make
-    /// obsolete workers exit promptly.
-    pub fn retireAnalysisThread(self: *HostState) void {
-        if (self.analysis_thread) |old_t| {
-            self.analysis_orphans.ensureUnusedCapacity(1) catch {
-                // Extreme OOM only: join so the handle is not leaked. May briefly
-                // stall Stop; never detach (HostState UAF on teardown).
-                old_t.join();
-                self.analysis_thread = null;
-                return;
-            };
-            self.analysis_thread = null;
-            self.analysis_orphans.appendAssumeCapacity(old_t);
+    /// Teardown / EOF: invalidate every in-flight metric so the pool exits walks.
+    pub fn supersedeAllAnalysis(self: *HostState) void {
+        var i: usize = 0;
+        while (i < analysis_kind_count) : (i += 1) {
+            _ = self.analysis_kind_gen[i].fetchAdd(1, .acq_rel);
         }
     }
 
-    /// Only the current analysis generation may clear shared running / budget.
-    /// A superseded worker must not flip `analysis_running` off while a newer
-    /// request is live, or return WorkerBudget to training under that request.
-    pub fn finishAnalysisSlot(self: *HostState, gen: u64) void {
-        if (!self.analysisGenCurrent(gen)) return;
-        self.analysis_running.store(false, .release);
+    pub fn analysisGenCurrent(self: *HostState, kind: AnalysisKind, gen: u64) bool {
+        return self.analysis_kind_gen[analysisKindIndex(kind)].load(.acquire) == gen;
+    }
+
+    fn replyAnalysisDropped(self: *HostState, task: *AnalysisTask, message: []const u8) void {
+        task.aborted.store(true, .release);
+        self.untrack(task.request_id);
+        var err_reply = ipc.makeErrorReply(
+            self.allocator,
+            task.request_id,
+            task.job_id,
+            task.op,
+            "superseded",
+            message,
+        ) catch return;
+        defer err_reply.deinit();
+        self.writeReply(err_reply) catch {};
+    }
+
+    fn dropQueuedAnalysisLocked(self: *HostState, message: []const u8) void {
+        for (self.analysis_queue.items) |task| {
+            self.replyAnalysisDropped(task, message);
+            freeAnalysisTask(task);
+        }
+        self.analysis_queue.clearRetainingCapacity();
+        self.analysis_queued.store(0, .release);
+    }
+
+    /// Drop a queued task that matches `needle` (identical coalesce key).
+    fn dropMatchingQueuedAnalysisLocked(self: *HostState, needle: *const AnalysisTask) void {
+        var i: usize = 0;
+        while (i < self.analysis_queue.items.len) {
+            const task = self.analysis_queue.items[i];
+            if (analysisTasksSameKey(task, needle)) {
+                _ = self.analysis_queue.orderedRemove(i);
+                self.replyAnalysisDropped(task, "analysis coalesced");
+                freeAnalysisTask(task);
+                continue;
+            }
+            i += 1;
+        }
+        self.analysis_queued.store(@intCast(self.analysis_queue.items.len), .release);
+    }
+
+    /// When the queue is full, drop the lowest-priority (then oldest) entry.
+    fn dropLowestPriorityQueuedLocked(self: *HostState) bool {
+        if (self.analysis_queue.items.len == 0) return false;
+        var worst_i: usize = 0;
+        var worst_pri = self.analysis_queue.items[0].priority;
+        var i: usize = 1;
+        while (i < self.analysis_queue.items.len) : (i += 1) {
+            const pri = self.analysis_queue.items[i].priority;
+            if (pri >= worst_pri) {
+                worst_pri = pri;
+                worst_i = i;
+            }
+        }
+        const task = self.analysis_queue.orderedRemove(worst_i);
+        self.replyAnalysisDropped(task, "analysis queue full");
+        freeAnalysisTask(task);
+        self.analysis_queued.store(@intCast(self.analysis_queue.items.len), .release);
+        return true;
+    }
+
+    fn pickNextAnalysisIndexLocked(self: *HostState) ?usize {
+        if (self.analysis_queue.items.len == 0) return null;
+        var best_i: usize = 0;
+        var best_pri = self.analysis_queue.items[0].priority;
+        var i: usize = 1;
+        while (i < self.analysis_queue.items.len) : (i += 1) {
+            const pri = self.analysis_queue.items[i].priority;
+            if (pri < best_pri) {
+                best_pri = pri;
+                best_i = i;
+            }
+        }
+        return best_i;
+    }
+
+    fn ensureAnalysisWorkerLocked(self: *HostState) !void {
+        if (self.analysis_worker != null) return;
+        self.analysis_worker_stop.store(false, .release);
+        self.analysis_worker = try std.Thread.spawn(.{}, analysisPoolMain, .{self});
+        self.analysis_live_workers.store(1, .release);
+    }
+
+    fn ensurePreviewWorkerLocked(self: *HostState) !void {
+        if (self.preview_worker != null) return;
+        self.preview_worker_stop.store(false, .release);
+        self.preview_worker = try std.Thread.spawn(.{}, previewPoolMain, .{self});
+        self.preview_live_workers.store(1, .release);
+    }
+
+    /// Only the current generation of `kind` may return WorkerBudget after a task.
+    /// A superseded task must not return budget while a newer same-metric task is queued/live.
+    pub fn finishAnalysisSlot(self: *HostState, kind: AnalysisKind, gen: u64) void {
+        if (!self.analysisGenCurrent(kind, gen)) return;
         self.returnBudgetToTraining();
     }
 
     pub fn writeReply(self: *HostState, reply: ipc.Envelope) !void {
+        // Unit-test binaries share stdout with the Zig 0.14 listen protocol.
+        // Writing IPC frames there desyncs the runner and hangs `zig build test`.
+        if (builtin.is_test) return;
         self.stdout_mu.lock();
         defer self.stdout_mu.unlock();
         try ipc.writeFrame(self.allocator, std.io.getStdOut().writer(), reply);
@@ -1911,7 +2088,18 @@ fn formatStatusBody(allocator: std.mem.Allocator, state: *HostState) ![]u8 {
             .{ pt.iterations, pt.iterations, pt.value, pt.nash_gap, pt.accuracy_chips },
         );
     }
-    try w.writeAll("],\"transport\":\"ipc\",\"sidecar\":\"solver-engine\"}");
+    try w.writeAll("],\"transport\":\"ipc\",\"sidecar\":\"solver-engine\"");
+    // IPC audit §5: live analysis/preview workers and retained queue depth.
+    try w.print(
+        ",\"analysis_live_workers\":{d},\"analysis_queued\":{d},\"preview_live_workers\":{d},\"preview_queued\":{d}",
+        .{
+            state.analysis_live_workers.load(.acquire),
+            state.analysis_queued.load(.acquire),
+            state.preview_live_workers.load(.acquire),
+            state.preview_queued.load(.acquire),
+        },
+    );
+    try w.writeAll("}");
     return try list.toOwnedSlice();
 }
 
@@ -2722,10 +2910,17 @@ fn analysisSupersededReply(state: *HostState, task: *AnalysisTask) void {
         task.job_id,
         task.op,
         "superseded",
-        "analysis superseded by a newer node request",
+        "analysis superseded by a newer request for this metric",
     ) catch return;
     defer err_reply.deinit();
     state.writeReply(err_reply) catch {};
+}
+
+fn analysisTaskCancelledOrStale(state: *HostState, task: *AnalysisTask) bool {
+    if (task.aborted.load(.acquire)) return true;
+    if (!state.analysisGenCurrent(task.kind, task.gen)) return true;
+    if (state.isCancelled(task.job_id)) return true;
+    return false;
 }
 
 /// Borrow published policy for analysis.
@@ -2746,28 +2941,59 @@ fn borrowPublishedForAnalysis(
     return state.session.borrowPublished();
 }
 
-fn analysisWorker(task: *AnalysisTask) void {
+/// Persistent analysis pool: one owned worker drains a bounded priority queue.
+fn analysisPoolMain(state: *HostState) void {
+    while (true) {
+        state.analysis_mu.lock();
+        while (state.analysis_queue.items.len == 0 and !state.analysis_worker_stop.load(.acquire)) {
+            state.analysis_cv.wait(&state.analysis_mu);
+        }
+        // On stop, leave any remaining queue for joinAnalysis to drop — do not
+        // start another task (avoids join waiting on a long borrow/solve).
+        if (state.analysis_worker_stop.load(.acquire)) {
+            state.analysis_running.store(false, .release);
+            state.analysis_current = null;
+            state.analysis_live_workers.store(0, .release);
+            state.analysis_mu.unlock();
+            return;
+        }
+        const idx = state.pickNextAnalysisIndexLocked() orelse {
+            state.analysis_mu.unlock();
+            continue;
+        };
+        const task = state.analysis_queue.orderedRemove(idx);
+        state.analysis_queued.store(@intCast(state.analysis_queue.items.len), .release);
+        state.analysis_current = task;
+        state.analysis_running.store(true, .release);
+        state.analysis_mu.unlock();
+
+        runAnalysisTask(task);
+
+        state.analysis_mu.lock();
+        state.analysis_current = null;
+        if (state.analysis_queue.items.len == 0) {
+            state.analysis_running.store(false, .release);
+        }
+        state.analysis_mu.unlock();
+    }
+}
+
+fn runAnalysisTask(task: *AnalysisTask) void {
     const state = task.state;
     var budget_held = false;
     defer {
         state.untrack(task.request_id);
         if (budget_held) {
-            // Gen-scoped: superseded workers must not clear shared budget/running.
-            state.finishAnalysisSlot(task.gen);
-        } else if (state.analysisGenCurrent(task.gen)) {
-            // Never borrowed budget (early supersede / nothing_published) but still
-            // own the running slot if we are current.
-            state.analysis_running.store(false, .release);
+            // Gen-scoped: superseded tasks must not return budget while a newer
+            // same-metric request owns the slot.
+            state.finishAnalysisSlot(task.kind, task.gen);
         }
-        state.allocator.free(task.request_id);
-        if (task.job_id) |j| state.allocator.free(j);
-        state.allocator.free(task.op);
-        state.allocator.free(task.body_json);
-        state.allocator.destroy(task);
+        freeAnalysisTask(task);
     }
 
-    if (!state.analysisGenCurrent(task.gen)) {
-        analysisSupersededReply(state, task);
+    // Safe-point cancel / coalesce / supersession checks.
+    if (analysisTaskCancelledOrStale(state, task)) {
+        if (!task.aborted.load(.acquire)) analysisSupersededReply(state, task);
         return;
     }
 
@@ -2780,8 +3006,8 @@ fn analysisWorker(task: *AnalysisTask) void {
     // skip the wait (ZR-170).
     const wait_ns: u64 = 30 * std.time.ns_per_s;
     var lease = borrowPublishedForAnalysis(state, wait_ns) catch |err| {
-        if (!state.analysisGenCurrent(task.gen)) {
-            analysisSupersededReply(state, task);
+        if (analysisTaskCancelledOrStale(state, task)) {
+            if (!task.aborted.load(.acquire)) analysisSupersededReply(state, task);
             return;
         }
         var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "nothing_published", @errorName(err)) catch return;
@@ -2790,9 +3016,9 @@ fn analysisWorker(task: *AnalysisTask) void {
         return;
     };
 
-    if (!state.analysisGenCurrent(task.gen)) {
+    if (analysisTaskCancelledOrStale(state, task)) {
         lease.deinit();
-        analysisSupersededReply(state, task);
+        if (!task.aborted.load(.acquire)) analysisSupersededReply(state, task);
         return;
     }
 
@@ -2808,6 +3034,28 @@ fn analysisWorker(task: *AnalysisTask) void {
         defer owned.deinit();
         lease.deinit();
         state.writeReply(owned) catch {};
+        return;
+    }
+
+    // Validate coalesce scope against the lease actually acquired.
+    if (task.solution_id != 0 and task.solution_id != lease.solution_id) {
+        lease.deinit();
+        var err_reply = ipc.makeErrorReply(
+            state.allocator,
+            task.request_id,
+            task.job_id,
+            task.op,
+            "expired_solution",
+            "expected solution is no longer current",
+        ) catch return;
+        defer err_reply.deinit();
+        state.writeReply(err_reply) catch {};
+        return;
+    }
+
+    if (analysisTaskCancelledOrStale(state, task)) {
+        lease.deinit();
+        if (!task.aborted.load(.acquire)) analysisSupersededReply(state, task);
         return;
     }
 
@@ -2862,8 +3110,8 @@ fn analysisWorker(task: *AnalysisTask) void {
     lease.deinit();
     defer reply.deinit();
 
-    if (!state.analysisGenCurrent(task.gen)) {
-        analysisSupersededReply(state, task);
+    if (analysisTaskCancelledOrStale(state, task)) {
+        if (!task.aborted.load(.acquire)) analysisSupersededReply(state, task);
         return;
     }
     state.writeReply(reply) catch {};
@@ -3094,8 +3342,11 @@ fn startAnalysis(state: *HostState, req: ipc.Envelope, kind: AnalysisKind) !void
         return;
     }
 
-    // Coalesce: bump gen so any in-flight older analysis replies superseded.
-    const gen = state.bumpAnalysisGen();
+    // Per-metric gen: independent metrics keep their own current generation.
+    const gen = state.bumpAnalysisGen(kind);
+    const solution_id = state.session.solution_id;
+    const policy_revision = state.session.policyRevision();
+    const node_id_hash = hashNodeId(bodyStringField(req.body_json, "node_id"));
 
     const request_id = try state.allocator.dupe(u8, req.request_id);
     errdefer state.allocator.free(request_id);
@@ -3116,25 +3367,50 @@ fn startAnalysis(state: *HostState, req: ipc.Envelope, kind: AnalysisKind) !void
         .body_json = body_json,
         .kind = kind,
         .gen = gen,
+        .solution_id = solution_id,
+        .policy_revision = policy_revision,
+        .node_id_hash = node_id_hash,
+        .priority = analysisKindPriority(kind),
     };
 
-    // Park prior join handle (bounded orphans) — never detach (audit #3).
-    state.retireAnalysisThread();
+    state.analysis_mu.lock();
+    defer state.analysis_mu.unlock();
 
-    state.analysis_running.store(true, .release);
-    state.analysis_thread = std.Thread.spawn(.{}, analysisWorker, .{task}) catch |err| {
-        state.analysis_running.store(false, .release);
-        state.allocator.free(task.request_id);
-        if (task.job_id) |j| state.allocator.free(j);
-        state.allocator.free(task.op);
-        state.allocator.free(task.body_json);
-        state.allocator.destroy(task);
+    // Drop identical queued work immediately (coalesce by launch/solution/revision/node/metric).
+    state.dropMatchingQueuedAnalysisLocked(task);
+
+    // Bound: if full, drop lowest-priority queued work to make room (nav preferred).
+    if (state.analysis_queue.items.len >= max_analysis_queue) {
+        _ = state.dropLowestPriorityQueuedLocked();
+    }
+    if (state.analysis_queue.items.len >= max_analysis_queue) {
         state.untrack(req.request_id);
+        freeAnalysisTask(task);
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "analysis queue full");
+        defer err_reply.deinit();
+        try state.writeReply(err_reply);
+        return;
+    }
+
+    state.ensureAnalysisWorkerLocked() catch |err| {
+        state.untrack(req.request_id);
+        freeAnalysisTask(task);
         var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
         defer err_reply.deinit();
         try state.writeReply(err_reply);
         return;
     };
+
+    state.analysis_queue.append(task) catch |err| {
+        state.untrack(req.request_id);
+        freeAnalysisTask(task);
+        var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
+        defer err_reply.deinit();
+        try state.writeReply(err_reply);
+        return;
+    };
+    state.analysis_queued.store(@intCast(state.analysis_queue.items.len), .release);
+    state.analysis_cv.signal();
 }
 
 pub fn startValues(state: *HostState, req: ipc.Envelope) !void {
@@ -3428,33 +3704,65 @@ pub fn startOpen(state: *HostState, req: ipc.Envelope) !void {
     try startIo(state, req, .open, path, false, null);
 }
 
-fn previewWorker(task: *PreviewTask) void {
+/// Persistent preview worker: depth-1 latest-draft queue (no orphan handle growth).
+fn previewPoolMain(state: *HostState) void {
+    while (true) {
+        state.preview_mu.lock();
+        while (state.preview_latest == null and !state.preview_worker_stop.load(.acquire)) {
+            state.preview_cv.wait(&state.preview_mu);
+        }
+        // On stop, leave the latest draft for joinPreview to drop.
+        if (state.preview_worker_stop.load(.acquire)) {
+            state.preview_running.store(false, .release);
+            state.preview_current = null;
+            state.preview_live_workers.store(0, .release);
+            state.preview_mu.unlock();
+            return;
+        }
+        const task = state.preview_latest orelse {
+            state.preview_mu.unlock();
+            continue;
+        };
+        state.preview_latest = null;
+        state.preview_queued.store(0, .release);
+        state.preview_current = task;
+        state.preview_running.store(true, .release);
+        state.preview_mu.unlock();
+
+        runPreviewTask(task);
+
+        state.preview_mu.lock();
+        state.preview_current = null;
+        if (state.preview_latest == null) {
+            state.preview_running.store(false, .release);
+        }
+        state.preview_mu.unlock();
+    }
+}
+
+fn runPreviewTask(task: *PreviewTask) void {
     const state = task.state;
     defer {
         state.untrack(task.request_id);
-        // Only the live generation clears the running flag.
-        if (state.previewGenCurrent(task.gen)) {
-            state.preview_running.store(false, .release);
-        }
-        state.allocator.free(task.request_id);
-        if (task.job_id) |j| state.allocator.free(j);
-        state.allocator.free(task.op);
-        state.allocator.free(task.config);
-        state.allocator.destroy(task);
+        freePreviewTask(task);
     }
 
-    if (!state.previewGenCurrent(task.gen)) {
-        var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "superseded", "newer preview request") catch return;
-        defer err_reply.deinit();
-        state.writeReply(err_reply) catch {};
+    if (task.aborted.load(.acquire) or !state.previewGenCurrent(task.gen)) {
+        if (!task.aborted.load(.acquire)) {
+            var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "superseded", "newer preview request") catch return;
+            defer err_reply.deinit();
+            state.writeReply(err_reply) catch {};
+        }
         return;
     }
 
     var bundle = poker_app.plan_preview.compilePreview(state.allocator, task.config) catch |err| {
-        if (!state.previewGenCurrent(task.gen)) {
-            var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "superseded", "newer preview request") catch return;
-            defer err_reply.deinit();
-            state.writeReply(err_reply) catch {};
+        if (task.aborted.load(.acquire) or !state.previewGenCurrent(task.gen)) {
+            if (!task.aborted.load(.acquire)) {
+                var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "superseded", "newer preview request") catch return;
+                defer err_reply.deinit();
+                state.writeReply(err_reply) catch {};
+            }
             return;
         }
         const code: []const u8 = if (err == error.OutOfMemory) "budget_exceeded" else "invalid_config";
@@ -3465,17 +3773,18 @@ fn previewWorker(task: *PreviewTask) void {
     };
     defer bundle.deinit();
 
-    if (!state.previewGenCurrent(task.gen)) {
-        var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "superseded", "newer preview request") catch return;
-        defer err_reply.deinit();
-        state.writeReply(err_reply) catch {};
+    if (task.aborted.load(.acquire) or !state.previewGenCurrent(task.gen)) {
+        if (!task.aborted.load(.acquire)) {
+            var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "superseded", "newer preview request") catch return;
+            defer err_reply.deinit();
+            state.writeReply(err_reply) catch {};
+        }
         return;
     }
 
     const body = blk: {
         switch (task.kind) {
             .tree_preview => {
-                // One compile → tree nodes + nested memory plan.
                 break :blk poker_app.plan_preview.formatTreePreviewJson(state.allocator, &bundle) catch |err| {
                     const code: []const u8 = if (err == error.OutOfMemory) "out_of_memory" else "invalid_config";
                     var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, code, @errorName(err)) catch return;
@@ -3506,10 +3815,12 @@ fn previewWorker(task: *PreviewTask) void {
     };
     defer state.allocator.free(body);
 
-    if (!state.previewGenCurrent(task.gen)) {
-        var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "superseded", "newer preview request") catch return;
-        defer err_reply.deinit();
-        state.writeReply(err_reply) catch {};
+    if (task.aborted.load(.acquire) or !state.previewGenCurrent(task.gen)) {
+        if (!task.aborted.load(.acquire)) {
+            var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, "superseded", "newer preview request") catch return;
+            defer err_reply.deinit();
+            state.writeReply(err_reply) catch {};
+        }
         return;
     }
 
@@ -3547,8 +3858,7 @@ fn startPreview(state: *HostState, req: ipc.Envelope, kind: PreviewKind) !void {
     var config_owned = true;
     errdefer if (config_owned) state.allocator.free(config);
 
-    // Supersede any in-flight preview (newer draft wins).
-    state.retirePreviewThread();
+    // Latest-draft policy: bump gen and replace any queued draft immediately.
     const gen = state.bumpPreviewGen();
 
     const task = blk: {
@@ -3571,31 +3881,28 @@ fn startPreview(state: *HostState, req: ipc.Envelope, kind: PreviewKind) !void {
         config_owned = false;
         break :blk created;
     };
-    var worker_owns_task = false;
-    errdefer if (!worker_owns_task) {
-        state.allocator.free(task.request_id);
-        if (task.job_id) |j| state.allocator.free(j);
-        state.allocator.free(task.op);
-        state.allocator.free(task.config);
-        state.allocator.destroy(task);
-    };
 
-    state.preview_running.store(true, .release);
-    state.preview_thread = std.Thread.spawn(.{}, previewWorker, .{task}) catch |err| {
-        state.preview_running.store(false, .release);
-        state.allocator.free(task.request_id);
-        if (task.job_id) |j| state.allocator.free(j);
-        state.allocator.free(task.op);
-        state.allocator.free(task.config);
-        state.allocator.destroy(task);
-        worker_owns_task = true;
+    state.preview_mu.lock();
+    defer state.preview_mu.unlock();
+
+    if (state.preview_latest) |old| {
+        state.replyPreviewDropped(old, "newer preview request");
+        freePreviewTask(old);
+        state.preview_latest = null;
+    }
+
+    state.ensurePreviewWorkerLocked() catch |err| {
         state.untrack(req.request_id);
+        freePreviewTask(task);
         var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "host_error", @errorName(err));
         defer err_reply.deinit();
         try state.writeReply(err_reply);
         return;
     };
-    worker_owns_task = true;
+
+    state.preview_latest = task;
+    state.preview_queued.store(1, .release);
+    state.preview_cv.signal();
 }
 
 pub fn startTreePreview(state: *HostState, req: ipc.Envelope) !void {
@@ -3606,14 +3913,18 @@ pub fn startPlanMemory(state: *HostState, req: ipc.Envelope) !void {
     try startPreview(state, req, .plan_memory);
 }
 
-test "ZR-151 analysis gen coalesce marks older gens stale" {
+test "ZR-151 analysis gen coalesce marks older gens stale per metric" {
     var state = try HostState.init(std.testing.allocator, "analysis-gen");
     defer state.deinit();
-    const g1 = state.bumpAnalysisGen();
-    try std.testing.expect(state.analysisGenCurrent(g1));
-    const g2 = state.bumpAnalysisGen();
-    try std.testing.expect(state.analysisGenCurrent(g2));
-    try std.testing.expect(!state.analysisGenCurrent(g1));
+    const g1 = state.bumpAnalysisGen(.values);
+    try std.testing.expect(state.analysisGenCurrent(.values, g1));
+    const g2 = state.bumpAnalysisGen(.values);
+    try std.testing.expect(state.analysisGenCurrent(.values, g2));
+    try std.testing.expect(!state.analysisGenCurrent(.values, g1));
+    // Independent metric stays current.
+    const eq = state.bumpAnalysisGen(.equity);
+    try std.testing.expect(state.analysisGenCurrent(.equity, eq));
+    try std.testing.expect(state.analysisGenCurrent(.values, g2));
 }
 
 test "preview gen supersedes stale drafts" {
@@ -3626,10 +3937,9 @@ test "preview gen supersedes stale drafts" {
     try std.testing.expect(!state.previewGenCurrent(g1));
 }
 
-test "superseded analysis finish does not clear live slot or train job" {
-    // Audit #3: a dead/superseded worker must not flip analysis_running off or
-    // return WorkerBudget while a newer analysis owns the slot — and must not
-    // disturb an unrelated in-flight train identity.
+test "superseded analysis finish does not return budget for live gen" {
+    // Audit #3: a superseded task must not return WorkerBudget while a newer
+    // same-metric request owns the slot — and must not disturb train identity.
     var state = try HostState.init(std.testing.allocator, "analysis-slot");
     defer state.deinit();
 
@@ -3639,55 +3949,109 @@ test "superseded analysis finish does not clear live slot or train job" {
     state.prioritizeAnalysisBudget(1);
     try std.testing.expect(state.budget.analysis > 0);
 
-    const stale_gen = state.bumpAnalysisGen();
-    const live_gen = state.bumpAnalysisGen();
-    try std.testing.expect(state.analysisGenCurrent(live_gen));
-    try std.testing.expect(!state.analysisGenCurrent(stale_gen));
+    const stale_gen = state.bumpAnalysisGen(.values);
+    const live_gen = state.bumpAnalysisGen(.values);
+    try std.testing.expect(state.analysisGenCurrent(.values, live_gen));
+    try std.testing.expect(!state.analysisGenCurrent(.values, stale_gen));
 
-    // Superseded worker exits — shared slot must stay live for live_gen.
-    state.finishAnalysisSlot(stale_gen);
+    // Superseded finish — budget stays with the live generation.
+    state.finishAnalysisSlot(.values, stale_gen);
     try std.testing.expect(state.analysis_running.load(.acquire));
     try std.testing.expect(state.budget.analysis > 0);
     try std.testing.expect(state.train_running.load(.acquire));
     try std.testing.expect(state.matchesActiveJob("train-current"));
 
-    // Current generation may clear the analysis slot without touching train.
-    state.finishAnalysisSlot(live_gen);
-    try std.testing.expect(!state.analysis_running.load(.acquire));
+    // Current generation may return budget without touching train.
+    state.finishAnalysisSlot(.values, live_gen);
     try std.testing.expectEqual(@as(u32, 0), state.budget.analysis);
     try std.testing.expect(state.train_running.load(.acquire));
     try std.testing.expect(state.matchesActiveJob("train-current"));
 }
 
-test "retireAnalysisThread parks orphans joinable without detach" {
-    var state = try HostState.init(std.testing.allocator, "analysis-orphans");
+test "analysis pool coalesce drops identical queued work" {
+    // Do not call replyAnalysisDropped / writeReply here — under `zig build test`
+    // stdout is the listen protocol; writing IPC frames hangs the runner forever.
+    var state = try HostState.init(std.testing.allocator, "analysis-coalesce");
     defer state.deinit();
 
-    const Gate = struct {
-        release: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-        fn worker(self: *@This()) void {
-            while (!self.release.load(.acquire)) {
-                std.Thread.sleep(1 * std.time.ns_per_ms);
-            }
+    const mk = struct {
+        fn task(s: *HostState, rid: []const u8, kind: AnalysisKind, node_hash: u64) !*AnalysisTask {
+            const t = try s.allocator.create(AnalysisTask);
+            t.* = .{
+                .state = s,
+                .request_id = try s.allocator.dupe(u8, rid),
+                .job_id = null,
+                .op = try s.allocator.dupe(u8, @tagName(kind)),
+                .body_json = try s.allocator.dupe(u8, "{}"),
+                .kind = kind,
+                .gen = s.bumpAnalysisGen(kind),
+                .solution_id = 1,
+                .policy_revision = 1,
+                .node_id_hash = node_hash,
+                .priority = analysisKindPriority(kind),
+            };
+            return t;
         }
-    };
-    var gate1: Gate = .{};
-    var gate2: Gate = .{};
+    }.task;
 
-    state.analysis_thread = try std.Thread.spawn(.{}, Gate.worker, .{&gate1});
-    state.retireAnalysisThread();
-    try std.testing.expect(state.analysis_thread == null);
-    try std.testing.expectEqual(@as(usize, 1), state.analysis_orphans.items.len);
+    const freeMatching = struct {
+        fn call(s: *HostState, needle: *const AnalysisTask) void {
+            var i: usize = 0;
+            while (i < s.analysis_queue.items.len) {
+                const task = s.analysis_queue.items[i];
+                if (analysisTasksSameKey(task, needle)) {
+                    _ = s.analysis_queue.orderedRemove(i);
+                    freeAnalysisTask(task);
+                    continue;
+                }
+                i += 1;
+            }
+            s.analysis_queued.store(@intCast(s.analysis_queue.items.len), .release);
+        }
+    }.call;
 
-    state.analysis_thread = try std.Thread.spawn(.{}, Gate.worker, .{&gate2});
-    state.retireAnalysisThread();
-    try std.testing.expectEqual(@as(usize, 2), state.analysis_orphans.items.len);
+    const freeAllQueued = struct {
+        fn call(s: *HostState) void {
+            for (s.analysis_queue.items) |task| freeAnalysisTask(task);
+            s.analysis_queue.clearRetainingCapacity();
+            s.analysis_queued.store(0, .release);
+        }
+    }.call;
 
-    gate1.release.store(true, .release);
-    gate2.release.store(true, .release);
+    // Hold the pool idle so tasks stay queued (stop latch before ensure).
+    state.analysis_worker_stop.store(true, .release);
+    state.analysis_mu.lock();
+    defer state.analysis_mu.unlock();
+    const a = try mk(&state, "a", .values, 42);
+    const b = try mk(&state, "b", .values, 42);
+    try state.analysis_queue.append(a);
+    freeMatching(&state, b);
+    try std.testing.expectEqual(@as(usize, 0), state.analysis_queue.items.len);
+    try state.analysis_queue.append(b);
+    try std.testing.expectEqual(@as(usize, 1), state.analysis_queue.items.len);
+    // Navigation priority sorts ahead of reports.
+    const nav = try mk(&state, "nav", .node, 1);
+    const report = try mk(&state, "rep", .line_card_report, 2);
+    try state.analysis_queue.append(report);
+    try state.analysis_queue.append(nav);
+    const pick = state.pickNextAnalysisIndexLocked().?;
+    try std.testing.expect(state.analysis_queue.items[pick].kind == .node);
+    freeAllQueued(&state);
+}
+
+test "analysis pool is a single retained worker not per-request orphans" {
+    var state = try HostState.init(std.testing.allocator, "analysis-pool");
+    defer state.deinit();
+    state.analysis_mu.lock();
+    try state.ensureAnalysisWorkerLocked();
+    try std.testing.expect(state.analysis_worker != null);
+    try std.testing.expectEqual(@as(u32, 1), state.analysis_live_workers.load(.acquire));
+    try state.ensureAnalysisWorkerLocked();
+    try std.testing.expectEqual(@as(u32, 1), state.analysis_live_workers.load(.acquire));
+    state.analysis_mu.unlock();
     state.joinAnalysis();
-    try std.testing.expectEqual(@as(usize, 0), state.analysis_orphans.items.len);
-    try std.testing.expect(state.analysis_thread == null);
+    try std.testing.expect(state.analysis_worker == null);
+    try std.testing.expectEqual(@as(u32, 0), state.analysis_live_workers.load(.acquire));
 }
 
 test "ready dispatch" {

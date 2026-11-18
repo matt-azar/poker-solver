@@ -2569,7 +2569,25 @@ mod tests {
             rpc_shared(&io_a, "ready", Value::Null, None, READY_TIMEOUT)
                 .await
                 .expect("ready");
-            // Next RPC should observe connection loss from malformed framing.
+
+            // Sidecar emits a garbage frame immediately after ready. Wait for the
+            // reader to mark the connection closed before issuing status — otherwise
+            // a status can sit in the write queue until BeforeWrite timeout instead
+            // of observing framing death (CI flake on ipc-race-linux).
+            let close_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+            while !io_a.connection_closed.load(Ordering::SeqCst) {
+                if tokio::time::Instant::now() >= close_deadline {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            assert!(
+                io_a.connection_closed.load(Ordering::SeqCst),
+                "malformed frame after ready must close connection A"
+            );
+
+            // With the gate already closed, status must fail as connection loss
+            // (rpc_shared short-circuits before enqueue).
             let err = rpc_shared(&io_a, "status", Value::Null, None, Duration::from_secs(2))
                 .await
                 .unwrap_err();
@@ -2577,12 +2595,12 @@ mod tests {
                 err.is_connection_loss() || matches!(err, IpcError::ConnectionLoss { .. }),
                 "{err:?}"
             );
-            assert!(io_a.connection_closed.load(Ordering::SeqCst));
 
             // Fresh launch B must not share A's closed gate.
             let session_b = spawn_supervised_test_sidecar("accept-malformed-b");
             let io_b = Arc::clone(&session_b.io);
             assert!(!Arc::ptr_eq(&io_a, &io_b));
+            assert!(!io_b.connection_closed.load(Ordering::SeqCst));
             let ready_b = rpc_shared(&io_b, "ready", Value::Null, None, READY_TIMEOUT)
                 .await
                 .expect("fresh launch ready");
