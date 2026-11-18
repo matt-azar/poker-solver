@@ -5,7 +5,6 @@ const poker_engine = @import("poker_engine");
 const hand_categories = poker_engine.poker.hand_categories;
 const hand_eval = poker_engine.poker.hand_eval;
 const card = poker_engine.poker.card;
-const range_mod = poker_engine.poker.range;
 
 pub const PackError = error{OutOfMemory};
 
@@ -38,47 +37,7 @@ fn appendJsonString(list: *std.ArrayList(u8), value: []const u8) PackError!void 
     list.append('"') catch return error.OutOfMemory;
 }
 
-fn appendPlayerHands(
-    list: *std.ArrayList(u8),
-    player: hand_categories.PlayerCategoryMass,
-    model: []const u8,
-) PackError!void {
-    const is_draws = std.mem.eql(u8, model, hand_categories.draw_category_model);
-    list.appendSlice(",\"hands\":[") catch return error.OutOfMemory;
-    var first = true;
-    var index: i32 = 0;
-    while (index < card.combo_count) : (index += 1) {
-        const mask = player.combo_tags[@intCast(index)];
-        if (mask == 0) continue;
-        var combo_buf: [4]u8 = undefined;
-        const combo = range_mod.Range.comboText(index, &combo_buf) catch continue;
-        if (!first) list.append(',') catch return error.OutOfMemory;
-        first = false;
-        list.appendSlice("{\"combo\":") catch return error.OutOfMemory;
-        try appendJsonString(list, combo);
-        list.appendSlice(",\"categories\":[") catch return error.OutOfMemory;
-        var cat_first = true;
-        var slot: usize = 0;
-        while (slot < player.count) : (slot += 1) {
-            if ((mask & (@as(u16, 1) << @intCast(slot))) == 0) continue;
-            if (!cat_first) list.append(',') catch return error.OutOfMemory;
-            cat_first = false;
-            const name = if (is_draws)
-                hand_categories.drawCategoryName(@enumFromInt(@as(u8, @intCast(slot))))
-            else
-                hand_categories.categoryName(@enumFromInt(@as(u8, @intCast(slot))));
-            try appendJsonString(list, name);
-        }
-        list.appendSlice("]}") catch return error.OutOfMemory;
-    }
-    list.append(']') catch return error.OutOfMemory;
-}
-
-fn appendPlayer(
-    list: *std.ArrayList(u8),
-    player: hand_categories.PlayerCategoryMass,
-    model: []const u8,
-) PackError!void {
+fn appendPlayer(list: *std.ArrayList(u8), player: hand_categories.PlayerCategoryMass) PackError!void {
     const count = player.count;
     list.appendSlice("{\"defined\":") catch return error.OutOfMemory;
     list.appendSlice(if (player.defined) "true" else "false") catch return error.OutOfMemory;
@@ -108,9 +67,7 @@ fn appendPlayer(
             list.appendSlice("null") catch return error.OutOfMemory;
         }
     }
-    list.append(']') catch return error.OutOfMemory;
-    try appendPlayerHands(list, player, model);
-    list.append('}') catch return error.OutOfMemory;
+    list.appendSlice("]}") catch return error.OutOfMemory;
 }
 
 fn appendCategoryNames(list: *std.ArrayList(u8), model: []const u8, category_count: usize) PackError!void {
@@ -190,9 +147,9 @@ pub fn packStudyCategoriesBody(allocator: std.mem.Allocator, args: PackArgs) Pac
     try list.appendSlice("],\"categories\":[");
     try appendCategoryNames(&list, args.report.model, args.report.category_count);
     try list.appendSlice("],\"oop\":");
-    try appendPlayer(&list, args.report.player0, args.report.model);
+    try appendPlayer(&list, args.report.player0);
     try list.appendSlice(",\"ip\":");
-    try appendPlayer(&list, args.report.player1, args.report.model);
+    try appendPlayer(&list, args.report.player1);
     try list.appendSlice(",\"query_seconds\":");
     try appendF64(&list, args.query_seconds);
     try list.append('}');

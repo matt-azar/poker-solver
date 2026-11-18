@@ -1,16 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  exactComboAvailability,
   paintClassAt,
   parseExactRange,
   weightsFromExact,
   type ExactRange,
 } from "../../domain/range";
 import { formatEquityPercent, validateEquityDraft } from "../../domain/equity/validation";
-import {
-  transportAllowsEquityCalculator,
-  transportEquityUnavailableReason,
-} from "../../engine/ipcCapabilities";
 import { useEquityStore } from "../../state/equityStore";
 import { SeatActionCatalogueTree } from "../build/SeatActionCatalogueTree";
 import { ControlledRangeGrid } from "./ControlledRangeGrid";
@@ -22,7 +17,6 @@ export function EquityWorkspace() {
   const recent = useEquityStore((s) => s.recent);
   const setName = useEquityStore((s) => s.setName);
   const setMethod = useEquityStore((s) => s.setMethod);
-  const setTargetSamples = useEquityStore((s) => s.setTargetSamples);
   const setBoardText = useEquityStore((s) => s.setBoardText);
   const setDeadText = useEquityStore((s) => s.setDeadText);
   const setPlayerLabel = useEquityStore((s) => s.setPlayerLabel);
@@ -51,9 +45,6 @@ export function EquityWorkspace() {
   const [boardText, setBoardTextLocal] = useState(() => draft.board.join(" "));
   const [deadText, setDeadTextLocal] = useState(() => draft.deadCards.join(" "));
 
-  const calculatorAvailable = transportAllowsEquityCalculator();
-  const calculatorUnavailableReason = transportEquityUnavailableReason();
-
   useEffect(() => {
     if (run.jobId) {
       void refreshJob();
@@ -79,14 +70,6 @@ export function EquityWorkspace() {
   const validation = validateEquityDraft(draft);
   const result = run.stale ? run.previous?.result : run.status?.result;
   const resultPlayers = result?.players ?? [];
-  const boardDeadText = useMemo(
-    () => [...draft.board, ...draft.deadCards].join(" "),
-    [draft.board, draft.deadCards],
-  );
-  const selectedAvailability = useMemo(
-    () => exactComboAvailability(selectedExact, boardDeadText),
-    [selectedExact, boardDeadText],
-  );
 
   const usedCards = useMemo(() => {
     const used = new Set<string>();
@@ -108,9 +91,6 @@ export function EquityWorkspace() {
     || run.status?.state === "preparing"
     || run.status?.state === "running"
     || run.status?.state === "stopping";
-
-  const showSamples =
-    draft.method === "monte_carlo" || draft.method === "auto";
 
   function applyPaint(row: number, col: number) {
     if (!selected) {
@@ -146,30 +126,11 @@ export function EquityWorkspace() {
     }
   }
 
-  const statusMessage = (() => {
-    if (!calculatorAvailable) {
-      return calculatorUnavailableReason;
-    }
-    if (run.error) {
-      return null;
-    }
-    if (importError) {
-      return null;
-    }
-    if (!validation.ok) {
-      return validation.errors[0] ?? "Fix the scenario before calculating.";
-    }
-    if (run.status) {
-      return null;
-    }
-    return "Enter ranges for at least two seats, then Calculate.";
-  })();
-
   return (
     <div className="equity-workspace">
       <header className="equity-toolbar">
         <div className="equity-toolbar-main">
-          <h1>Equity calculator</h1>
+          <h1>Equity</h1>
           <input
             className="equity-name"
             value={draft.name}
@@ -190,19 +151,6 @@ export function EquityWorkspace() {
               <option value="monte_carlo">Monte Carlo</option>
             </select>
           </label>
-          {showSamples ? (
-            <label className="equity-method">
-              Samples
-              <input
-                type="number"
-                min={1}
-                step={1000}
-                value={draft.targetSamples}
-                aria-label="Monte Carlo sample count"
-                onChange={(event) => setTargetSamples(Number(event.target.value))}
-              />
-            </label>
-          ) : null}
         </div>
         <div className="equity-toolbar-actions">
           <button
@@ -270,7 +218,7 @@ export function EquityWorkspace() {
             <tbody>
               {draft.players.map((player) => {
                 const parsed = parseExactRange(player.rangeText);
-                const availability = exactComboAvailability(parsed.range, boardDeadText);
+                const comboCount = [...parsed.range.values()].filter((weight) => weight > 0).length;
                 const rowResult = resultPlayers.find((item) => item.id === player.id);
                 return (
                   <tr
@@ -284,7 +232,6 @@ export function EquityWorkspace() {
                         checked={player.enabled}
                         aria-label={`${player.label} enabled`}
                         onChange={(event) => setPlayerEnabled(player.id, event.target.checked)}
-                        onFocus={() => selectPlayer(player.id)}
                         onClick={(event) => event.stopPropagation()}
                       />
                     </td>
@@ -293,7 +240,6 @@ export function EquityWorkspace() {
                         value={player.label}
                         aria-label="Player label"
                         onChange={(event) => setPlayerLabel(player.id, event.target.value)}
-                        onFocus={() => selectPlayer(player.id)}
                         onClick={(event) => event.stopPropagation()}
                       />
                     </td>
@@ -304,13 +250,10 @@ export function EquityWorkspace() {
                         placeholder="e.g. QQ+,AJs+,AsKh"
                         aria-label={`${player.label} range`}
                         onChange={(event) => setPlayerRangeText(player.id, event.target.value)}
-                        onFocus={() => selectPlayer(player.id)}
                         onClick={(event) => event.stopPropagation()}
                       />
                     </td>
-                    <td className="num">
-                      {player.rangeText.trim() ? availability.available : "—"}
-                    </td>
+                    <td className="num">{player.rangeText.trim() ? comboCount : "—"}</td>
                     <td className="num equity-emphasis">
                       {player.enabled ? formatEquityPercent(rowResult?.equity) : "—"}
                     </td>
@@ -345,7 +288,6 @@ export function EquityWorkspace() {
                         className="ghost"
                         onClick={(event) => {
                           event.stopPropagation();
-                          selectPlayer(player.id);
                           randomPlayer(player.id);
                         }}
                       >
@@ -356,7 +298,6 @@ export function EquityWorkspace() {
                         className="ghost"
                         onClick={(event) => {
                           event.stopPropagation();
-                          selectPlayer(player.id);
                           clearPlayer(player.id);
                         }}
                       >
@@ -430,14 +371,7 @@ export function EquityWorkspace() {
               <button
                 type="button"
                 className="primary"
-                disabled={!calculatorAvailable || !validation.ok}
-                title={
-                  !calculatorAvailable
-                    ? calculatorUnavailableReason
-                    : !validation.ok
-                      ? validation.errors[0]
-                      : "Calculate equity"
-                }
+                disabled={!validation.ok}
                 onClick={() => void calculate()}
               >
                 Calculate
@@ -461,10 +395,13 @@ export function EquityWorkspace() {
                     ? ` · ${run.status.progress_done}/${run.status.progress_total}`
                     : ""}
                 </span>
-              ) : statusMessage ? (
-                <span>{statusMessage}</span>
-              ) : null}
+              ) : (
+                <span>Ready — no solution required</span>
+              )}
               {run.error ? <span className="equity-error">{run.error}</span> : null}
+              {!validation.ok && !run.error ? (
+                <span className="equity-error">{validation.errors[0]}</span>
+              ) : null}
               {importError ? <span className="equity-error">{importError}</span> : null}
             </div>
           </div>
@@ -508,7 +445,6 @@ export function EquityWorkspace() {
                 className="equity-range-textarea"
                 value={selected.rangeText}
                 rows={4}
-                onFocus={() => selectPlayer(selected.id)}
                 onChange={(event) => setPlayerRangeText(selected.id, event.target.value)}
               />
               {selectedParsed.errors.length ? (
@@ -517,12 +453,8 @@ export function EquityWorkspace() {
                 </p>
               ) : (
                 <p className="muted">
-                  {selectedAvailability.available} available
-                  {selectedAvailability.original !== selectedAvailability.available
-                    ? ` (${selectedAvailability.original} original)`
-                    : ""}
-                  {" "}
-                  of 1,326 starting hands
+                  {[...selectedExact.values()].filter((weight) => weight > 0).length} combos of 1,326
+                  starting hands
                 </p>
               )}
             </>

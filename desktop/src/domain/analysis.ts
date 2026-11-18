@@ -20,14 +20,7 @@ export function normalizeBucketWeights(
 export interface CategorySeatView {
   defined: boolean;
   totalMass: number | null;
-  rows: Array<{
-    /** Raw category id from the host (used for matrix filter matching). */
-    id: string;
-    /** Display label (title-cased). */
-    name: string;
-    fraction: number;
-    mass: number | null;
-  }>;
+  rows: Array<{ name: string; fraction: number; mass: number | null }>;
 }
 
 const CATEGORY_LABEL_ACRONYMS: Record<string, string> = {
@@ -87,7 +80,6 @@ export function categorySeatView(
       defined,
       totalMass,
       rows: list.map((name, index) => ({
-        id: name,
         name: formatCategoryLabel(name),
         fraction: Number(fractionList[index] ?? 0) || 0,
         mass: masses ? Number(masses[index] ?? 0) || 0 : null,
@@ -100,7 +92,6 @@ export function categorySeatView(
       defined,
       totalMass,
       rows: Object.entries(seat.fractions).map(([name, fraction]) => ({
-        id: name,
         name: formatCategoryLabel(name),
         fraction: Number(fraction) || 0,
         mass: null,
@@ -175,81 +166,6 @@ export function filterHandsByEquityBands(
       return equity < hi;
     });
   });
-}
-
-/** Category-tagged hand row from host `categories` (optional matrix-filter payload). */
-export interface CategoryHandRow {
-  combo: string;
-  weight?: number;
-  /** Category ids matching `categories[]` names (raw, before title-case). */
-  categories: string[];
-}
-
-/** Keep hands that carry any of the selected category names (case-insensitive). */
-export function filterHandsByCategories(
-  hands: CategoryHandRow[] | null | undefined,
-  selected: ReadonlySet<string> | string[] | null | undefined,
-): CategoryHandRow[] {
-  if (!hands?.length) {
-    return [];
-  }
-  const selectedNames = selected instanceof Set
-    ? [...selected]
-    : Array.isArray(selected)
-      ? selected
-      : [];
-  const wanted = new Set(
-    selectedNames.map((name) => name.trim().toLowerCase()),
-  );
-  if (!wanted.size) {
-    return hands.slice();
-  }
-  return hands.filter((hand) =>
-    (hand.categories ?? []).some((name) => wanted.has(name.trim().toLowerCase())),
-  );
-}
-
-/**
- * Map suit-specific combos (AhAd, AhKh, …) onto Study matrix cell labels (AA, AKs).
- * Mirrors Value / Bluffs `matrixCellForCombo` placement.
- */
-export function matrixCellLabelForCombo(combo: string): string | null {
-  const key = combo.trim().toUpperCase();
-  if (key.length < 4) {
-    return null;
-  }
-  const ranks = "AKQJT98765432";
-  const high = ranks.indexOf(key[0]!);
-  const low = ranks.indexOf(key[2]!);
-  if (high < 0 || low < 0) {
-    return null;
-  }
-  const suited = key[1] === key[3];
-  if (key[0] === key[2]) {
-    return `${ranks[high]}${ranks[high]}`;
-  }
-  const top = Math.min(high, low);
-  const bottom = Math.max(high, low);
-  return suited
-    ? `${ranks[top]}${ranks[bottom]}s`
-    : `${ranks[top]}${ranks[bottom]}o`;
-}
-
-/** Matrix cell labels that contain at least one of the given combos. */
-export function matrixCellsFromCombos(
-  combos: Iterable<string> | null | undefined,
-): Set<string> {
-  const cells = new Set<string>();
-  if (!combos) {
-    return cells;
-  }
-  for (const combo of combos) {
-    const label = matrixCellLabelForCombo(combo);
-    if (label) {
-      cells.add(label);
-    }
-  }
-  return cells;
 }
 
 export interface ShapeCompositionRow {

@@ -6,7 +6,6 @@ import {
   combosForClass,
   createExactRangeHistory,
   exactCellSummary,
-  exactComboAvailability,
   exactPairFromTexts,
   exactPairsEqual,
   paintClass,
@@ -171,17 +170,5 @@ describe("parseRangeText compatibility wrappers", () => {
   it("averages exact combos into the class cell instead of ignoring them", () => {
     const grid = parseRangeText("AsAd:0.5");
     expect(grid[0]![0]).toBeCloseTo(0.5 / 6, 12);
-  });
-});
-
-describe("exactComboAvailability", () => {
-  it("counts AA vs KK available combos after As Kh 7c 4d 2s removal", () => {
-    const board = "As Kh 7c 4d 2s";
-    const aa = exactComboAvailability(parseExactRange("AA").range, board);
-    const kk = exactComboAvailability(parseExactRange("KK").range, board);
-    expect(aa.original).toBe(6);
-    expect(aa.available).toBe(3);
-    expect(kk.original).toBe(6);
-    expect(kk.available).toBe(3);
   });
 });

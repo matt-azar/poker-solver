@@ -22,12 +22,6 @@ export function withBase(path: string): string {
   return `${baseNorm}${pathNorm}`;
 }
 
-export type DemoPackIndex = {
-  nodes?: string[];
-  max_chance_children?: number | null;
-  chance_children_exported?: Record<string, string[]>;
-};
-
 export type PrecomputedSession = {
   exampleId: string;
   variantId: string;
@@ -40,11 +34,6 @@ export type PrecomputedSession = {
   setVariant: (variantId: string) => Promise<void>;
   getExpected: () => Promise<DemoExpected>;
   getStatusGeneration: () => number;
-  /**
-   * Child node ids materialized under a chance node (`index.json`).
-   * Null when not a capped demo pack (treat all chance links as recorded).
-   */
-  recordedChildIdsForChance: (chanceNodeId: string) => ReadonlySet<string> | null;
 };
 
 function envelope(op: string, body: unknown, requestId: string): IpcRequestEnvelope {
@@ -177,19 +166,6 @@ export async function createPrecomputedSession(opts: {
   const cache = new Map<string, unknown>();
   let requestSeq = 0;
   let statusGenerationBump = 0;
-  let packIndex: DemoPackIndex | null = null;
-  let packIndexLoaded = false;
-
-  async function ensurePackIndex(): Promise<DemoPackIndex | null> {
-    if (packIndexLoaded) {
-      return packIndex;
-    }
-    packIndexLoaded = true;
-    packIndex = await loadPackJson<DemoPackIndex>("index.json", { optional: true });
-    return packIndex;
-  }
-
-  await ensurePackIndex();
 
   async function loadPackJson<T>(
     rel: string,
@@ -390,9 +366,6 @@ export async function createPrecomputedSession(opts: {
       session.variantId = variantId;
       session.packBase = packBase;
       statusGenerationBump += 1;
-      packIndex = null;
-      packIndexLoaded = false;
-      void ensurePackIndex();
     },
     async getExpected() {
       const expected = await loadPackJson<DemoExpected>("expected.json");
@@ -402,19 +375,6 @@ export async function createPrecomputedSession(opts: {
       return expected;
     },
     getStatusGeneration: () => statusGenerationBump,
-    recordedChildIdsForChance(chanceNodeId: string) {
-      const index = packIndex;
-      if (!index?.chance_children_exported) {
-        // No export cap metadata — every linked child is treated as recorded.
-        return null;
-      }
-      const exported = index.chance_children_exported[chanceNodeId];
-      if (!exported) {
-        // Chance node absent from samples: enable nothing until index lists it.
-        return new Set();
-      }
-      return new Set(exported);
-    },
   };
 
   return session;

@@ -91,7 +91,6 @@ type EquityStore = {
   run: EquityRunState;
   setName: (name: string) => void;
   setMethod: (method: EquityMethod) => void;
-  setTargetSamples: (samples: number) => void;
   setBoardText: (text: string) => void;
   setDeadText: (text: string) => void;
   setPlayerLabel: (id: string, label: string) => void;
@@ -150,16 +149,6 @@ export const useEquityStore = create<EquityStore>((set, get) => ({
 
   setMethod(method) {
     const draft = { ...get().draft, method };
-    persistDraft(draft);
-    set({ draft });
-    get().markStale();
-  },
-
-  setTargetSamples(samples) {
-    const next = Number.isFinite(samples)
-      ? Math.max(1, Math.min(50_000_000, Math.floor(samples)))
-      : 100_000;
-    const draft = { ...get().draft, targetSamples: next };
     persistDraft(draft);
     set({ draft });
     get().markStale();

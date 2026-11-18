@@ -14,11 +14,11 @@ import type { EvDisplayBasis } from "../../domain/types";
 import { engineClient } from "../../engine/client";
 import { useStudyStore } from "../../state/studyStore";
 
-/** Player-facing metrics only — deal probability stays in calcs, not as a view. */
-const METRICS: Array<{ id: Exclude<LineCardMetric, "deal">; label: string }> = [
+const METRICS: Array<{ id: LineCardMetric; label: string }> = [
   { id: "frequencies", label: "Frequencies" },
   { id: "ev", label: "EV" },
   { id: "equity", label: "Equity" },
+  { id: "deal", label: "Deal probability" },
 ];
 
 interface CellExtra {
@@ -128,7 +128,7 @@ export function LineCardReport() {
   const draftPot = useStudyStore((s) => s.draft?.pot);
   const statusPot = useStudyStore((s) => s.status?.pot);
   const rootPot = Number(draftPot ?? statusPot ?? 0);
-  const [metric, setMetric] = useState<Exclude<LineCardMetric, "deal">>("frequencies");
+  const [metric, setMetric] = useState<LineCardMetric>("frequencies");
   const [extras, setExtras] = useState<Record<string, CellExtra>>({});
   const reportRef = useRef(report);
   useEffect(() => {
@@ -386,6 +386,11 @@ export function LineCardReport() {
     if (!row) {
       return "—";
     }
+    if (metric === "deal") {
+      return formatPct(
+        row.dealProbabilityDefined ? row.dealProbability : null,
+      );
+    }
     if (!row.available) {
       return row.reason ?? "Unavailable";
     }
@@ -472,6 +477,8 @@ export function LineCardReport() {
           <span className="line-card-summary__metric">EV in chips</span>
         ) : metric === "equity" ? (
           <span className="line-card-summary__metric">Equity</span>
+        ) : metric === "deal" ? (
+          <span className="line-card-summary__metric">Probability of the card being dealt</span>
         ) : null}
       </p>
       {metric === "frequencies" && colors.legend.length ? (

@@ -1,9 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import {
-  chanceCardOptions,
-  hasAlternateDeals,
-} from "../../domain/cards";
-import { lineCardReportStreet } from "../../domain/lineCardReport";
+import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { clampDockHeight } from "../../state/layoutStore";
 import { useStudyStore } from "../../state/studyStore";
 import { AnalysisDockPanel } from "./AnalysisDockPanel";
@@ -12,7 +7,7 @@ import { ValueBluffsPanel } from "./ValueBluffsPanel";
 
 const TABS = [
   { id: "line-cards", label: "Compare runouts" },
-  { id: "equity", label: "Range equity" },
+  { id: "equity", label: "Equity" },
   { id: "categories", label: "Categories" },
   { id: "value-bluffs", label: "Value / Bluffs" },
 ] as const;
@@ -24,27 +19,7 @@ export function LowerDock() {
   const setLayout = useStudyStore((s) => s.setLayout);
   const analysisTab = useStudyStore((s) => s.analysisTab);
   const setAnalysisTab = useStudyStore((s) => s.setAnalysisTab);
-  const currentNode = useStudyStore((s) => s.currentNode);
-  const boardChangeChanceNode = useStudyStore((s) => s.boardChangeChanceNode);
-  const lineCardReport = useStudyStore((s) => s.lineCardReport);
   const dragRef = useRef<{ startY: number; startH: number; cap: number } | null>(null);
-
-  const showCompareRunouts = useMemo(() => {
-    if (lineCardReport) {
-      return true;
-    }
-    const chance = boardChangeChanceNode ?? currentNode;
-    const options = chanceCardOptions(chance);
-    if (hasAlternateDeals(options)) {
-      return true;
-    }
-    return lineCardReportStreet(currentNode?.board) != null;
-  }, [boardChangeChanceNode, currentNode, lineCardReport]);
-
-  const visibleTabs = useMemo(
-    () => TABS.filter((tab) => tab.id !== "line-cards" || showCompareRunouts),
-    [showCompareRunouts],
-  );
 
   useEffect(() => {
     // Repair a corrupted height without forcing the dock open over the matrix.
@@ -63,12 +38,8 @@ export function LowerDock() {
     }
     if (tab === "bluffs") {
       setAnalysisTab("value-bluffs");
-      return;
     }
-    if (tab === "line-cards" && !showCompareRunouts) {
-      setAnalysisTab("equity");
-    }
-  }, [analysisTab, setAnalysisTab, showCompareRunouts]);
+  }, [analysisTab, setAnalysisTab]);
 
   const onPointerDown = useCallback(
     (event: ReactPointerEvent) => {
@@ -131,7 +102,7 @@ export function LowerDock() {
     return (
       <section className="lower-dock lower-dock--collapsed" aria-label="Analysis">
         <div className="lower-dock__tabs" role="tablist" aria-label="Analysis">
-          {visibleTabs.map((tab) => (
+          {TABS.map((tab) => (
             <button
               key={tab.id}
               type="button"
@@ -149,7 +120,7 @@ export function LowerDock() {
   }
 
   let body: ReactNode;
-  if (activeTab === "line-cards" && showCompareRunouts) {
+  if (activeTab === "line-cards") {
     body = <LineCardReport />;
   } else if (activeTab === "value-bluffs") {
     body = <ValueBluffsPanel />;
@@ -171,7 +142,7 @@ export function LowerDock() {
         title="Drag to resize"
       />
       <div className="lower-dock__tabs" role="tablist" aria-label="Analysis">
-        {visibleTabs.map((tab) => (
+        {TABS.map((tab) => (
           <button
             key={tab.id}
             type="button"

@@ -476,10 +476,7 @@ export function ValueBluffsPanel() {
         setHighlightCells(null);
       };
     }
-    setHighlightCells(matrixCellsForValueBluffs(rows), {
-      source: "value-bluffs",
-      label: "Value / Bluffs filter",
-    });
+    setHighlightCells(matrixCellsForValueBluffs(rows));
     return () => {
       setHighlightCells(null);
     };

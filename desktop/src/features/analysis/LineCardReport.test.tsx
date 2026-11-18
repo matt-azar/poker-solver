@@ -173,9 +173,8 @@ describe("LineCardReport", () => {
     expect(screen.getAllByRole("row")).toHaveLength(5);
   });
 
-  it("toggles cell values among frequencies, EV, and equity (no deal-probability view)", async () => {
+  it("toggles cell values among frequencies, EV, equity, and deal probability", async () => {
     render(<LineCardReport />);
-    expect(screen.queryByRole("button", { name: "Deal probability" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "EV" }));
     expect(await screen.findByText("12.5")).toBeTruthy();
     expect(getValues).toHaveBeenCalled();
@@ -201,9 +200,14 @@ describe("LineCardReport", () => {
       "check-down",
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Frequencies" }));
-    expect(screen.getAllByText("25.0%").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Deal probability" }));
+    expect(screen.getAllByText("2.0%").length).toBeGreaterThan(0);
+    expect(screen.queryByText("25.0%")).toBeNull();
     expect(ace.getAttribute("data-heat")).toBe("false");
+    expect(king.getAttribute("data-heat")).toBe("false");
+    expect(screen.getByTestId("line-card-line").textContent).toContain(
+      "Probability of the card being dealt",
+    );
   });
 });
 

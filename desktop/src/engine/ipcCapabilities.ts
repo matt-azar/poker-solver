@@ -12,32 +12,7 @@
  * enabled so unit tests that mock the store can still exercise handlers.
  */
 import { isTauriRuntime } from "../platform";
-import { getActiveTransport, isIpcTransport } from "./transport";
-
-/** Public demo precomputed packs refuse live train / equity jobs. */
-export const PRECOMPUTED_SIDECAR = "precomputed-pack";
-
-/** True when Solve / Equity Calculate should stay disabled (browse-only transport). */
-export function transportAllowsLiveSolve(): boolean {
-  const active = getActiveTransport();
-  if (active.kind !== "ipc") {
-    // Browser/Vitest without a fixture still exercises Solve handlers in unit tests.
-    return !isTauriRuntime();
-  }
-  return active.sidecar !== PRECOMPUTED_SIDECAR;
-}
-
-export function transportLiveSolveUnavailableReason(): string {
-  return "Public demo is precomputed — live solving requires the Windows app.";
-}
-
-export function transportAllowsEquityCalculator(): boolean {
-  return transportAllowsLiveSolve();
-}
-
-export function transportEquityUnavailableReason(): string {
-  return "Equity calculator needs the Windows app (live solver-engine).";
-}
+import { isIpcTransport } from "./transport";
 
 export const STUDY_IPC_FEATURE_FLAGS = {
   // Host `resolve_locked` + EngineClient IPC branch (#301).

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   studyIpcFeatureAvailable,
   studyIpcUnavailableReason,
@@ -6,20 +6,15 @@ import {
 import {
   buildEquityChartCurve,
   categorySeatView,
-  filterHandsByCategories,
   filterHandsByEquityBands,
   filteredEquityComposition,
-  matrixCellsFromCombos,
   normalizeBucketWeights,
-  type CategoryHandRow,
   type EquityChartPoint,
   type EquityHandRow,
 } from "../../domain/analysis";
-import { formatEquityPercent } from "../../domain/equity/validation";
 import { draftFromStudyNode } from "../../domain/equity/transfer";
 import { useEquityStore } from "../../state/equityStore";
 import { useStudyStore } from "../../state/studyStore";
-import { useValueBluffsHighlightStore } from "../../state/valueBluffsHighlightStore";
 
 interface CategoryPayload {
   available?: boolean;
@@ -32,14 +27,12 @@ interface CategoryPayload {
     mass?: number[];
     defined?: boolean;
     total_mass?: number | null;
-    hands?: CategoryHandRow[];
   };
   ip?: {
     fractions?: number[] | Record<string, number>;
     mass?: number[];
     defined?: boolean;
     total_mass?: number | null;
-    hands?: CategoryHandRow[];
   };
   pending?: boolean;
 }
@@ -90,7 +83,7 @@ function EquityHistogram({
               onClick={() => onToggle(bucket.lo, bucket.hi)}
             >
               <span className="tabular muted">
-                {(bucket.lo * 100).toFixed(0)}–{(bucket.hi * 100).toFixed(0)}%
+                {bucket.lo.toFixed(1)}–{bucket.hi.toFixed(1)}
               </span>
               <span className="equity-bar-track">
                 <span
@@ -211,7 +204,7 @@ function bandKey(lo: number, hi: number): string {
   return `${lo}:${hi}`;
 }
 
-/** Range equity and Categories panels for the Study lower dock. */
+/** Equity and Categories panels for the Study lower dock. */
 export function AnalysisDockPanel() {
   const categories = useStudyStore((s) => s.categories) as CategoryPayload | null;
   const equity = useStudyStore((s) => s.equity) as EquityPayload | null;
@@ -221,14 +214,9 @@ export function AnalysisDockPanel() {
   const currentNode = useStudyStore((s) => s.currentNode);
   const solutionId = useStudyStore((s) => s.solutionId);
   const setWorkspace = useStudyStore((s) => s.setWorkspace);
-  const setHighlightCells = useValueBluffsHighlightStore((s) => s.setHighlightCells);
-  const clearHighlight = useValueBluffsHighlightStore((s) => s.clearHighlight);
   const [categorySeat, setCategorySeat] = useState<"oop" | "ip">("oop");
   const [equitySeat, setEquitySeat] = useState<"oop" | "ip">("oop");
   const [selectedBands, setSelectedBands] = useState<Set<string>>(() => new Set());
-  const [selectedCategories, setSelectedCategories] = useState<Set<string>>(
-    () => new Set(),
-  );
   const [transferMessage, setTransferMessage] = useState<string | null>(null);
 
   const studyTransfer = useMemo(() => {
@@ -246,9 +234,6 @@ export function AnalysisDockPanel() {
       ),
     [categories, categorySeat],
   );
-
-  const categoryHands =
-    categorySeat === "oop" ? categories?.oop?.hands : categories?.ip?.hands;
 
   const equityHands = equitySeat === "oop" ? equity?.oop_hands : equity?.ip_hands;
   const equityBuckets =
@@ -285,98 +270,13 @@ export function AnalysisDockPanel() {
     });
   };
 
-  const toggleCategory = (id: string) => {
-    setSelectedCategories((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
-
-  useEffect(() => {
-    let prev = useValueBluffsHighlightStore.getState();
-    return useValueBluffsHighlightStore.subscribe((state) => {
-      if (
-        prev.highlightCells != null &&
-        state.highlightCells == null &&
-        prev.source === "equity-bands"
-      ) {
-        setSelectedBands(new Set());
-      }
-      if (
-        prev.highlightCells != null &&
-        state.highlightCells == null &&
-        prev.source === "categories"
-      ) {
-        setSelectedCategories(new Set());
-      }
-      prev = state;
-    });
-  }, []);
-
-  useEffect(() => {
-    if (analysisTab !== "equity") {
-      return;
-    }
-    if (selectedBands.size === 0) {
-      clearHighlight();
-      return;
-    }
-    const bands = [...selectedBands].map((key) => {
-      const [lo, hi] = key.split(":").map(Number);
-      return { lo: lo ?? 0, hi: hi ?? 0 };
-    });
-    const hands = filterHandsByEquityBands(equityHands, bands);
-    setHighlightCells(matrixCellsFromCombos(hands.map((hand) => hand.combo)), {
-      source: "equity-bands",
-      label:
-        selectedBands.size === 1
-          ? "Equity band filter"
-          : `${selectedBands.size} equity bands`,
-    });
-    return () => {
-      clearHighlight();
-    };
-  }, [analysisTab, clearHighlight, equityHands, selectedBands, setHighlightCells]);
-
-  useEffect(() => {
-    if (analysisTab !== "categories") {
-      return;
-    }
-    if (selectedCategories.size === 0) {
-      clearHighlight();
-      return;
-    }
-    const hands = filterHandsByCategories(categoryHands, selectedCategories);
-    setHighlightCells(matrixCellsFromCombos(hands.map((hand) => hand.combo)), {
-      source: "categories",
-      label:
-        selectedCategories.size === 1
-          ? "Category filter"
-          : `${selectedCategories.size} categories`,
-    });
-    return () => {
-      clearHighlight();
-    };
-  }, [
-    analysisTab,
-    categoryHands,
-    clearHighlight,
-    selectedCategories,
-    setHighlightCells,
-  ]);
-
   if (analysisTab === "equity") {
     return (
       <div className="range-explorer">
         <div className="panel-title-row">
-          <h2 className="panel-title">Range equity</h2>
+          <h2 className="panel-title">Equity</h2>
           <div className="panel-title-actions">
-            <div className="seat-toggle" role="group" aria-label="Range equity seat">
+            <div className="seat-toggle" role="group" aria-label="Equity seat">
               <button
                 type="button"
                 className="toolbar-btn"
@@ -416,11 +316,11 @@ export function AnalysisDockPanel() {
                 setWorkspace("equity");
               }}
             >
-              Open in Equity calculator
+              Open in Equity
             </button>
           </div>
         </div>
-        <p className="equity-note muted">Check-down equity as % of pot.</p>
+        <p className="equity-note muted">Equity (fraction of pot).</p>
         {transferMessage ? <p className="equity-note">{transferMessage}</p> : null}
         {!equity ? null : equity.pending ? (
           <p className="empty-hint">Loading…</p>
@@ -430,19 +330,21 @@ export function AnalysisDockPanel() {
               <div>
                 <span className="muted">OOP avg</span>
                 <strong className="tabular">
-                  {formatEquityPercent(equity.oop_equity)}
+                  {equity.oop_equity == null ? "—" : equity.oop_equity.toFixed(4)}
                 </strong>
               </div>
               <div>
                 <span className="muted">IP avg</span>
                 <strong className="tabular">
-                  {formatEquityPercent(equity.ip_equity)}
+                  {equity.ip_equity == null ? "—" : equity.ip_equity.toFixed(4)}
                 </strong>
               </div>
               <div>
                 <span className="muted">Filter avg</span>
                 <strong className="tabular">
-                  {formatEquityPercent(filteredView.averageEquity)}
+                  {filteredView.averageEquity == null
+                    ? "—"
+                    : filteredView.averageEquity.toFixed(4)}
                 </strong>
               </div>
             </div>
@@ -528,68 +430,32 @@ export function AnalysisDockPanel() {
       ) : categories.available === false ? (
         <p className="empty-hint">{categories.reason || "Not available on this board."}</p>
       ) : (
-        <>
-          <div className="equity-filter-row">
-            <span className="muted">
-              {selectedCategories.size === 0
-                ? categories.exclusive === false
-                  ? "Overlapping categories — select to filter matrix"
-                  : "Select categories to filter matrix"
-                : `${selectedCategories.size} selected`}
-            </span>
-            {selectedCategories.size > 0 ? (
-              <button
-                type="button"
-                className="toolbar-btn"
-                onClick={() => setSelectedCategories(new Set())}
-              >
-                Clear filter
-              </button>
-            ) : null}
-          </div>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Category</th>
-                <th>Mass</th>
-                <th>%</th>
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th>Mass</th>
+              <th>%</th>
+            </tr>
+          </thead>
+          <tbody>
+            {categoryView.rows.map((row) => (
+              <tr key={row.name}>
+                <td>{row.name}</td>
+                <td className="tabular">
+                  {row.mass == null ? "—" : row.mass.toFixed(3)}
+                </td>
+                <td className="tabular">
+                  <span
+                    className="category-bar"
+                    style={{ width: `${Math.min(100, row.fraction * 100)}%` }}
+                  />{" "}
+                  {(row.fraction * 100).toFixed(1)}%
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {categoryView.rows.map((row) => {
-                const active = selectedCategories.has(row.id);
-                return (
-                  <tr
-                    key={row.id}
-                    data-active={active ? "true" : "false"}
-                    className={active ? "category-row--active" : undefined}
-                  >
-                    <td>
-                      <button
-                        type="button"
-                        className="category-filter-btn"
-                        aria-pressed={active}
-                        onClick={() => toggleCategory(row.id)}
-                      >
-                        {row.name}
-                      </button>
-                    </td>
-                    <td className="tabular">
-                      {row.mass == null ? "—" : row.mass.toFixed(3)}
-                    </td>
-                    <td className="tabular">
-                      <span
-                        className="category-bar"
-                        style={{ width: `${Math.min(100, row.fraction * 100)}%` }}
-                      />{" "}
-                      {(row.fraction * 100).toFixed(1)}%
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </>
+            ))}
+          </tbody>
+        </table>
       )}
     </div>
   );

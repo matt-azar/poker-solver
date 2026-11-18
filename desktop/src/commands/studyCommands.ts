@@ -1,8 +1,6 @@
 import {
   studyIpcFeatureAvailable,
   studyIpcUnavailableReason,
-  transportAllowsLiveSolve,
-  transportLiveSolveUnavailableReason,
 } from "../engine/ipcCapabilities";
 import { validateSetupForSolve } from "../domain/setup";
 import { solveControlFlags } from "../domain/solveControls";
@@ -61,11 +59,8 @@ function eligible(ok: boolean, reason: string): CommandEligibility {
   return { ok, reason };
 }
 
-/** Shared Solve availability: transport capability + engine phase + draft validation. */
+/** Shared Solve availability: engine phase + live draft validation. */
 export function canExecuteSolve(ctx: StudyCommandContext): CommandEligibility {
-  if (!transportAllowsLiveSolve()) {
-    return eligible(false, transportLiveSolveUnavailableReason());
-  }
   const flags = solveControlFlags(ctx.phase);
   if (!flags.canSolve) {
     return eligible(
@@ -84,9 +79,6 @@ export function canExecuteSolve(ctx: StudyCommandContext): CommandEligibility {
 }
 
 export function canExecuteContinue(ctx: StudyCommandContext): CommandEligibility {
-  if (!transportAllowsLiveSolve()) {
-    return eligible(false, transportLiveSolveUnavailableReason());
-  }
   const flags = solveControlFlags(ctx.phase);
   if (!flags.canContinue) {
     return eligible(
