@@ -3,8 +3,12 @@ import {
   applyFrequencySliderEdit,
   buildFullRangeLockDraft,
   comboProbsRowsForHands,
+  compareActionAggregates,
+  compareChangeDescription,
   isHandLocked,
   lineLockNodeId,
+  lockAffectedComboCount,
+  lockDraftIsDirty,
   lockForNode,
   lockMutationCompletion,
   normalizeProbs,
@@ -16,6 +20,7 @@ import {
   toggleHandIndex,
   uniformProbs,
   weightedStrategyMix,
+  type ComparePayload,
 } from "./locks";
 
 describe("lock helpers", () => {
@@ -337,5 +342,87 @@ describe("lock helpers", () => {
         liveNodeId: "p0",
       }),
     ).toEqual({ applyLocksList: false, applyDraft: false });
+  });
+
+  it("detects dirty lock drafts and affected combo counts", () => {
+    const baseline = {
+      kind: "selected" as const,
+      handIndices: [0, 1],
+      probs: [0.8, 0.2],
+      comboProbsByHand: { 0: [0.8, 0.2], 1: [0.7, 0.3] },
+    };
+    expect(lockDraftIsDirty(baseline, baseline)).toBe(false);
+    expect(
+      lockDraftIsDirty(
+        { ...baseline, probs: [0.5, 0.5] },
+        baseline,
+      ),
+    ).toBe(true);
+    expect(lockAffectedComboCount(baseline, 10)).toBe(2);
+    expect(
+      lockAffectedComboCount(
+        { kind: "full", handIndices: [], probs: [1, 0] },
+        216,
+      ),
+    ).toBe(216);
+  });
+
+  it("aggregates compare actions with each strategy's weights", () => {
+    const note: ComparePayload = {
+      baseline_id: "s1",
+      scenario_id: "s2",
+      node_id: "p0",
+      baseline_value: 1,
+      scenario_value: 2,
+      value_delta: 1,
+      baseline_nash_gap: 0,
+      scenario_nash_gap: 0,
+      actions: ["Check", "Bet"],
+      hands: [
+        {
+          combo: "AcAd",
+          locked: true,
+          baseline: [1, 0],
+          scenario: [0, 1],
+          delta: [-1, 1],
+          baseline_weight: 1,
+          scenario_weight: 3,
+        },
+        {
+          combo: "KcKd",
+          locked: false,
+          baseline: [0, 1],
+          scenario: [1, 0],
+          delta: [1, -1],
+          baseline_weight: 1,
+          scenario_weight: 1,
+        },
+      ],
+    };
+    const summary = compareActionAggregates(note);
+    expect(summary).toHaveLength(2);
+    // baseline equal weight → Check 0.5; scenario 3:1 → Check 0.25
+    expect(summary[0]!.baseline).toBeCloseTo(0.5, 6);
+    expect(summary[0]!.scenario).toBeCloseTo(0.25, 6);
+    expect(compareChangeDescription(summary)).toMatch(/Check|Bet/);
+  });
+
+  it("prefers host action_summary when present", () => {
+    const note: ComparePayload = {
+      baseline_id: "s1",
+      scenario_id: "s2",
+      node_id: "p0",
+      baseline_value: 0,
+      scenario_value: 0,
+      value_delta: 0,
+      baseline_nash_gap: 0,
+      scenario_nash_gap: 0,
+      actions: ["Check"],
+      hands: [],
+      action_summary: [
+        { action: "Check", baseline: 0.6, scenario: 0.4, delta: -0.2 },
+      ],
+    };
+    expect(compareActionAggregates(note)[0]!.baseline).toBeCloseTo(0.6, 6);
   });
 });

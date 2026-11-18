@@ -42,7 +42,12 @@ describe("Node Locking workspace", () => {
     useStudyStore.setState({
       currentNode: aaNode,
       lockDraft: { kind: "selected", handIndices: [], probs: [0.5, 0.5] },
-      lockDraftBaseline: null,
+      lockDraftBaseline: {
+        kind: "selected",
+        handIndices: [],
+        probs: [0.5, 0.5],
+      },
+      lockScope: "node",
       lockDrawerOpen: true,
       locks: [],
       solutionId: "sol-test",
@@ -64,7 +69,9 @@ describe("Node Locking workspace", () => {
   it("opens as a dedicated Node Locking dialog", () => {
     render(<LockDrawer />);
     expect(screen.getByRole("dialog", { name: "Node locking" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Save & Close" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Apply lock" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Apply and re-solve" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Discard changes" })).toBeTruthy();
     expect(screen.getByRole("grid", { name: "Paint lock hand classes" })).toBeTruthy();
   });
 
@@ -143,17 +150,42 @@ describe("Node Locking workspace", () => {
     expect(screen.getByRole("checkbox", { name: "Protect Bet 50" })).toBeTruthy();
   });
 
-  it("closes after a successful Save & Close", async () => {
+  it("applies the draft lock without closing", async () => {
     const user = userEvent.setup();
     const applyLock = vi.fn(async () => true);
     useStudyStore.setState({
       lockDraft: { kind: "selected", handIndices: [0, 1, 2], probs: [0.5, 0.5] },
+      lockDraftBaseline: {
+        kind: "selected",
+        handIndices: [0, 1, 2],
+        probs: [0.5, 0.5],
+      },
       applyLock,
     });
     render(<LockDrawer />);
-    await user.click(screen.getByRole("button", { name: "Save & Close" }));
+    await user.click(screen.getByRole("button", { name: "Apply lock" }));
     expect(applyLock).toHaveBeenCalled();
+    expect(useStudyStore.getState().lockDrawerOpen).toBe(true);
+  });
+
+  it("Cancel closes and restores the last applied draft", async () => {
+    const user = userEvent.setup();
+    useStudyStore.setState({
+      lockDraft: {
+        kind: "selected",
+        handIndices: [0],
+        probs: [0.8, 0.2],
+      },
+      lockDraftBaseline: {
+        kind: "selected",
+        handIndices: [0],
+        probs: [0.5, 0.5],
+      },
+    });
+    render(<LockDrawer />);
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(useStudyStore.getState().lockDrawerOpen).toBe(false);
+    expect(useStudyStore.getState().lockDraft.probs).toEqual([0.5, 0.5]);
   });
 
   it("selects every combo with Select all", async () => {

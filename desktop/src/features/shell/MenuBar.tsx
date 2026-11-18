@@ -312,7 +312,7 @@ export function MenuBar({
               title: lockGate.reason,
             },
             {
-              label: "Open strategy editor",
+              label: "Session strategy edit…",
               onClick: () =>
                 executeOpenStrategyEditor({
                   ...commandDeps(),

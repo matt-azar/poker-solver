@@ -49,6 +49,18 @@ export function maxAbsDelta(delta: number[] | undefined): number {
   return max;
 }
 
+/** |Δ| for one action index on a hand row. */
+export function absDeltaAt(
+  delta: number[] | undefined,
+  actionIndex: number,
+): number {
+  if (!delta || actionIndex < 0 || actionIndex >= delta.length) {
+    return 0;
+  }
+  const value = delta[actionIndex];
+  return Number.isFinite(value) ? Math.abs(value as number) : 0;
+}
+
 export function shortId(id: string | null | undefined): string {
   if (!id) {
     return "—";
