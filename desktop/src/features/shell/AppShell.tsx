@@ -1,8 +1,9 @@
 /**
  * Top-level desktop chrome: menu bar, active workspace, status bar, dialogs.
  * Global colors/type: styles/tokens.css. Shell grid: styles/layout.css (.app-shell*).
+ * Surrounding chrome (§7): styles/chrome.css.
  */
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { DemoBanner } from "../../demo/DemoBanner";
 import {
   syncPublicDemoDocumentAttrs,
@@ -23,9 +24,26 @@ import { PreviewBanner } from "../../preview/PreviewBanner";
 import { RiverBetaBanner } from "../../river-beta/RiverBetaBanner";
 import { SolutionsCatalogue } from "../study/SolutionsCatalogue";
 import { StudyWorkspace } from "../study/StudyWorkspace";
+import { BuildSolvePrefs } from "./BuildSolvePrefs";
 import { HelpOverlay, MenuBar } from "./MenuBar";
 import { SettingsDialog } from "./SettingsDialog";
 import { StatusBar } from "./StatusBar";
+
+const DIALOG_FOCUSABLE = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
+
+function listDialogFocusable(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(DIALOG_FOCUSABLE)).filter(
+    (node) =>
+      !node.hasAttribute("disabled") && node.getAttribute("aria-hidden") !== "true",
+  );
+}
 
 export function AppShell() {
   const workspace = useStudyStore((s) => s.workspace);
@@ -43,12 +61,16 @@ export function AppShell() {
   const recoverEngineSession = useStudyStore((s) => s.recoverEngineSession);
   const reopenLastCheckpoint = useStudyStore((s) => s.reopenLastCheckpoint);
   const assistantOpen = useHelpChatStore((s) => s.layout.visible);
+  const assistantPlacement = useHelpChatStore((s) => s.layout.placement);
   const toggleAssistant = useHelpChatStore((s) => s.toggleVisible);
   const catalogueMode = useSolutionsCatalogueUi((s) => s.mode);
   const closeCatalogue = useSolutionsCatalogueUi((s) => s.closeCatalogue);
   const [helpOpen, setHelpOpen] = useState(false);
   const demoActive = usePublicDemoActive();
   const phoneDemo = usePhoneDemoLayout();
+  const catalogueDialogRef = useRef<HTMLDivElement>(null);
+  const catalogueRestoreFocusRef = useRef<HTMLElement | null>(null);
+  const assistantDocked = assistantOpen && assistantPlacement === "dock";
 
   useEffect(() => {
     applyDocumentTheme(theme);
@@ -78,6 +100,60 @@ export function AppShell() {
     startPolling();
     return () => stopPolling();
   }, [startPolling, stopPolling]);
+
+  useEffect(() => {
+    if (!catalogueMode) {
+      return;
+    }
+    catalogueRestoreFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = catalogueDialogRef.current;
+    if (!dialog) {
+      return;
+    }
+    const focusables = listDialogFocusable(dialog);
+    (focusables[0] ?? dialog).focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closeCatalogue();
+        return;
+      }
+      if (event.key !== "Tab") {
+        return;
+      }
+      const nodes = listDialogFocusable(dialog);
+      if (nodes.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey) {
+        if (active === first || !dialog.contains(active)) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !dialog.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      const restore = catalogueRestoreFocusRef.current;
+      if (restore && typeof restore.focus === "function" && document.contains(restore)) {
+        restore.focus();
+      }
+      catalogueRestoreFocusRef.current = null;
+    };
+  }, [catalogueMode, closeCatalogue]);
 
   async function reconnectEngine() {
     // Durable recovery path (ZR-123): re-ensure + clear sticky busy/cancel.
@@ -117,6 +193,7 @@ export function AppShell() {
       className="app-shell"
       data-public-demo={demoActive ? "true" : "false"}
       data-phone-demo={phoneDemo ? "true" : "false"}
+      data-assistant-dock={assistantDocked ? "true" : "false"}
     >
       <DemoBanner />
       <RiverBetaBanner />
@@ -131,6 +208,7 @@ export function AppShell() {
           onAssistantToggle={toggleAssistant}
         />
       )}
+      {workspace === "build" && !phoneDemo ? <BuildSolvePrefs /> : null}
       <div className="app-body">{body}</div>
       {phoneDemo ? null : (
         <StatusBar
@@ -160,9 +238,11 @@ export function AppShell() {
           }}
         >
           <div
+            ref={catalogueDialogRef}
             className="catalogue-modal catalogue-modal--tree"
             role="dialog"
             aria-modal="true"
+            tabIndex={-1}
             aria-label={
               catalogueMode === "save" ? "Save solution" : "Open solution"
             }

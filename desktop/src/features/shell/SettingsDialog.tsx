@@ -1,9 +1,5 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import type { BetSizeDisplayMode } from "../../domain/betSizes";
-import {
-  fastSolveDefaults,
-  formatHardwareHint,
-} from "../../domain/hardwareDefaults";
 import type { ThemePreference } from "../../domain/types";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
@@ -23,6 +19,7 @@ function listFocusable(root: HTMLElement): HTMLElement[] {
   );
 }
 
+/** Display preferences only — per-solve threads/memory live beside Build. */
 export function SettingsDialog() {
   const open = useSettingsStore((s) => s.settingsOpen);
   const setOpen = useSettingsStore((s) => s.setSettingsOpen);
@@ -32,10 +29,6 @@ export function SettingsDialog() {
   const setThemePreference = useStudyStore((s) => s.setThemePreference);
   const setEvDisplayBasis = useStudyStore((s) => s.setEvDisplayBasis);
   const evDisplayBasis = useStudyStore((s) => s.evDisplayBasis);
-  const draft = useStudyStore((s) => s.draft);
-  const updateDraft = useStudyStore((s) => s.updateDraft);
-  const machineDefaults = useMemo(() => fastSolveDefaults(), []);
-  const hardwareHint = formatHardwareHint(machineDefaults);
   const dialogRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
 
@@ -43,21 +36,14 @@ export function SettingsDialog() {
     if (!open) {
       return;
     }
-    // Align study store when Settings opens / values change from this dialog.
     setEvDisplayBasis(settings.evDisplayBasis);
     setThemePreference(settings.themePreference);
-    // Engine ships CFR+ only — drop draft Vanilla/DCFR labels if present.
-    if (draft.algorithm !== "cfr_plus") {
-      updateDraft({ algorithm: "cfr_plus" });
-    }
   }, [
     open,
     settings.evDisplayBasis,
     settings.themePreference,
     setEvDisplayBasis,
     setThemePreference,
-    draft.algorithm,
-    updateDraft,
   ]);
 
   useEffect(() => {
@@ -141,6 +127,10 @@ export function SettingsDialog() {
           </button>
         </div>
 
+        <p className="settings-hint">
+          Display preferences. Threads, memory, and samples are set on Build.
+        </p>
+
         <label className="settings-field">
           Theme
           <select
@@ -195,124 +185,7 @@ export function SettingsDialog() {
           </span>
         </label>
 
-        <h3 className="build-subhead">Solve</h3>
-        <p className="settings-hint">
-          Fast defaults · {hardwareHint}
-        </p>
-        <div className="settings-grid">
-          <label className="settings-field">
-            Algorithm
-            <input type="text" value="CFR+" readOnly disabled />
-            <span className="settings-hint">
-              Study trains with CFR+ only. Other algorithms are not available yet.
-            </span>
-          </label>
-          <label className="settings-field" title="How many full EV/gap refreshes to aim for during a solve. Live progress never waits more than 10 iterations between refreshes; Iter n/x updates every iteration.">
-            Samples
-            <input
-              type="number"
-              min={0}
-              value={draft.samples}
-              onChange={(event) => updateDraft({ samples: Number(event.target.value) })}
-            />
-          </label>
-          <label className="settings-field">
-            Threads
-            <input
-              type="number"
-              min={1}
-              max={64}
-              value={draft.threads}
-              onChange={(event) =>
-                updateDraft({ threads: Number(event.target.value), frozen: true })
-              }
-            />
-          </label>
-          <label className="settings-field">
-            Memory MiB
-            <input
-              type="number"
-              min={64}
-              value={draft.memoryMib}
-              onChange={(event) => updateDraft({ memoryMib: Number(event.target.value) })}
-            />
-          </label>
-        </div>
-        <label className="settings-field">
-          Solution path
-          <input
-            value={draft.solutionPath}
-            placeholder="/tmp/spot.psol"
-            onChange={(event) => updateDraft({ solutionPath: event.target.value })}
-          />
-        </label>
-        <label className="settings-field">
-          Incentives
-          <input
-            value={draft.incentives}
-            placeholder="label 0 b100 3.5; tag 1 bluff -2"
-            onChange={(event) => updateDraft({ incentives: event.target.value })}
-          />
-        </label>
-        <label className="settings-field">
-          Edge tags
-          <input
-            value={draft.edgeTags}
-            placeholder="b100 bluff; 1 f give_up"
-            onChange={(event) => updateDraft({ edgeTags: event.target.value })}
-          />
-        </label>
-
-        <label className="settings-check">
-          <input
-            type="checkbox"
-            checked={draft.useIcm}
-            onChange={(event) => updateDraft({ useIcm: event.target.checked })}
-          />
-          Use ICM
-        </label>
-        {draft.useIcm ? (
-          <>
-            <label className="settings-field">
-              ICM stacks
-              <input
-                value={draft.icmStacks}
-                placeholder="1000, 1000, 1000"
-                onChange={(event) => updateDraft({ icmStacks: event.target.value })}
-              />
-            </label>
-            <label className="settings-field">
-              ICM payouts
-              <input
-                value={draft.icmPayouts}
-                placeholder="500, 300, 200"
-                onChange={(event) => updateDraft({ icmPayouts: event.target.value })}
-              />
-              <span className="settings-hint">
-                Stacks need at least two seats. Places without a payout pay 0.
-              </span>
-            </label>
-          </>
-        ) : (
-          <span className="settings-hint">
-            Chip EV is used until ICM is checked. A normal solve does not send tournament stacks.
-          </span>
-        )}
-
         <div className="settings-actions">
-          <button
-            type="button"
-            className="toolbar-btn"
-            onClick={() =>
-              updateDraft({
-                threads: machineDefaults.threads,
-                memoryMib: machineDefaults.memoryMib,
-                frozen: true,
-              })
-            }
-          >
-            Reset to fast
-          </button>
           <button type="button" className="toolbar-btn" onClick={resetSettings}>
             Reset display defaults
           </button>

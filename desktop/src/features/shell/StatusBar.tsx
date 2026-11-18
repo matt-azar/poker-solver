@@ -1,3 +1,4 @@
+import { useId, useState } from "react";
 import {
   canExecuteContinue,
   canExecutePause,
@@ -49,11 +50,14 @@ export function StatusBar({
   const workspace = useStudyStore((s) => s.workspace);
   const currentNode = useStudyStore((s) => s.currentNode);
   const solveValidationErrors = useStudyStore((s) => s.solveValidationErrors);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const detailsId = useId();
   const checkpointPath = lastCheckpointPath.trim();
   const showReopen =
     Boolean(onReopenLastCheckpoint) &&
     canOfferReopenLastCheckpoint(checkpointPath) &&
     (connection === "disconnected" || !solutionId);
+  const disconnected = connection === "disconnected";
 
   const commandCtx = studyCommandContextFromStore({
     phase,
@@ -85,8 +89,18 @@ export function StatusBar({
     phase === "pause_requested" ||
     phase === "stop_requested";
 
+  const showPause = pauseGate.ok || phase === "solving" || phase === "building";
+  const showContinue =
+    continueGate.ok || phase === "paused" || phase === "pause_requested";
+
   return (
-    <footer className="status-bar" role="status" aria-live="polite">
+    <footer
+      className="status-bar"
+      role="status"
+      aria-live="polite"
+      data-disconnected={disconnected ? "true" : "false"}
+      data-details={detailsOpen ? "open" : "closed"}
+    >
       <span className="status-dot" data-state={connection} title={connection} />
       <span
         className="status-bar__phase"
@@ -106,26 +120,30 @@ export function StatusBar({
         >
           Solve
         </button>
-        <button
-          type="button"
-          className="toolbar-btn"
-          disabled={!continueGate.ok}
-          title={continueGate.reason}
-          onClick={() =>
-            void executeContinue({ ...commandDeps(), continueSolve })
-          }
-        >
-          Continue
-        </button>
-        <button
-          type="button"
-          className="toolbar-btn"
-          disabled={!pauseGate.ok}
-          title={pauseGate.reason}
-          onClick={() => void executePause({ ...commandDeps(), pause })}
-        >
-          Pause
-        </button>
+        {showContinue ? (
+          <button
+            type="button"
+            className="toolbar-btn"
+            disabled={!continueGate.ok}
+            title={continueGate.reason}
+            onClick={() =>
+              void executeContinue({ ...commandDeps(), continueSolve })
+            }
+          >
+            Continue
+          </button>
+        ) : null}
+        {showPause ? (
+          <button
+            type="button"
+            className="toolbar-btn"
+            disabled={!pauseGate.ok}
+            title={pauseGate.reason}
+            onClick={() => void executePause({ ...commandDeps(), pause })}
+          >
+            Pause
+          </button>
+        ) : null}
         <button
           type="button"
           className="toolbar-btn danger"
@@ -139,8 +157,12 @@ export function StatusBar({
       <span className="status-bar__msg" title={activity}>
         {activity || "Ready"}
       </span>
-      {connection === "disconnected" && onReconnect ? (
-        <button type="button" className="toolbar-btn" onClick={onReconnect}>
+      {disconnected && onReconnect ? (
+        <button
+          type="button"
+          className="toolbar-btn primary status-bar__reconnect"
+          onClick={onReconnect}
+        >
           Reconnect
         </button>
       ) : null}
@@ -159,18 +181,33 @@ export function StatusBar({
           Iter {metrics.iterations}
           {metrics.target !== "—" ? `/${metrics.target}` : ""}
         </span>
-        <span title="Active engine job id">Job {metrics.job}</span>
-        <span title="Elapsed solve time">Time {metrics.runtime}</span>
-        <span title="Estimated time to stop criterion (iterations or accuracy)">
-          ETA {metrics.eta}
-        </span>
-        <span title="Iterations per second">Rate {metrics.rate}</span>
-        <span title="Root OOP EV (chips)">EV {metrics.ev}</span>
         <span title="Pio Accuracy (NashConv/2) in chips and % of pot">
           Acc {metrics.nash}
         </span>
-        <span title="Engine-allocated heap">Mem {metrics.memory}</span>
+        <span title="Elapsed solve time">Time {metrics.runtime}</span>
       </span>
+      <button
+        type="button"
+        className="toolbar-btn status-bar__details-toggle"
+        aria-expanded={detailsOpen}
+        aria-controls={detailsId}
+        onClick={() => setDetailsOpen((open) => !open)}
+      >
+        {detailsOpen ? "Hide details" : "Details"}
+      </button>
+      {detailsOpen ? (
+        <div
+          id={detailsId}
+          className="status-bar__details tabular"
+          aria-label="Solve diagnostics"
+        >
+          <span title="Active engine job id">Job {metrics.job}</span>
+          <span title="Engine-allocated heap">Mem {metrics.memory}</span>
+          <span title="Iterations per second">Rate {metrics.rate}</span>
+          <span title="Estimated time to stop criterion">ETA {metrics.eta}</span>
+          <span title="Root OOP EV (chips)">EV {metrics.ev}</span>
+        </div>
+      ) : null}
     </footer>
   );
 }
