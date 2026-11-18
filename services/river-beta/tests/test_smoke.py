@@ -110,6 +110,68 @@ threads 1
         finally:
             mgr.shutdown()
 
+    def test_rejected_second_train_preserves_active_for_stop(self) -> None:
+        """Audit §7: busy train B must not steal active_job_id from A."""
+        bounds = RiverBetaBounds(
+            max_concurrent_sessions=1,
+            max_iterations=5000,
+            default_iterations=2000,
+            max_time_limit_sec=60.0,
+            default_time_limit_sec=30.0,
+            max_plan_memory_bytes=0,
+        )
+        mgr = SessionManager(bounds, engine_binary=_engine())
+        try:
+            s = mgr.create()
+            begin = s.ipc(
+                "begin_config",
+                {"config_text": load_default_config()},
+                timeout_s=60.0,
+            )
+            self.assertTrue(begin.get("ok"), begin)
+
+            a = s.ipc(
+                "solve",
+                {"iterations": 2000, "time_limit": 30},
+                job_id="job-a",
+                timeout_s=15.0,
+            )
+            self.assertTrue(a.get("ok"), a)
+            self.assertEqual(s.active_job_id, "job-a")
+
+            # Ensure host is still training before the competing request.
+            status = s.ipc("status", None, timeout_s=8.0)
+            status_body = status.get("body") or {}
+            if isinstance(status_body, str):
+                status_body = json.loads(status_body)
+            self.assertTrue(
+                isinstance(status_body, dict) and status_body.get("running"),
+                status,
+            )
+
+            b = s.ipc(
+                "solve",
+                {"iterations": 2000, "time_limit": 30},
+                job_id="job-b",
+                timeout_s=15.0,
+            )
+            self.assertFalse(b.get("ok"), b)
+            self.assertEqual(b.get("error_code"), "busy")
+            self.assertEqual(s.active_job_id, "job-a")
+
+            cancel = s.ipc("cancel", None, timeout_s=8.0)
+            self.assertTrue(cancel.get("ok"), cancel)
+            cancel_body = cancel.get("body") or {}
+            if isinstance(cancel_body, str):
+                cancel_body = json.loads(cancel_body)
+            self.assertTrue(
+                isinstance(cancel_body, dict) and cancel_body.get("cancelled") is True,
+                cancel,
+            )
+            s.poll_until_idle(timeout_s=30.0)
+        finally:
+            mgr.shutdown()
+
 
 if __name__ == "__main__":
     unittest.main()

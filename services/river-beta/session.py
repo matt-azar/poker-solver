@@ -34,6 +34,46 @@ class SessionError(RuntimeError):
         self.message = message
 
 
+def _decode_envelope_body(body: Any) -> Any:
+    """Host may return body as a JSON object or a JSON-encoded string."""
+    if isinstance(body, str):
+        import json
+
+        try:
+            return json.loads(body)
+        except json.JSONDecodeError:
+            return body
+    return body
+
+
+def is_train_admission_success(env: dict[str, Any]) -> bool:
+    """True only when the host admitted train (ZR-106 short-admit shape).
+
+    Mirrors desktop ``isTrainAdmissionSuccess``: busy / cancelled / not_running
+    must not promote a pending job id. Rejected second train preserves the
+    prior authoritative ``active_job_id``.
+    """
+    code = env.get("error_code")
+    if isinstance(code, str) and code.lower() in ("busy", "cancelled", "not_running"):
+        return False
+    if env.get("ok") is False:
+        return False
+    body = _decode_envelope_body(env.get("body"))
+    if isinstance(body, dict):
+        if body.get("busy") is True:
+            return False
+        body_code = body.get("error_code")
+        if isinstance(body_code, str) and body_code.lower() in (
+            "busy",
+            "cancelled",
+            "not_running",
+        ):
+            return False
+        return body.get("accepted") is True or body.get("running") is True
+    # Admit reply without a parseable body: require ok and no rejection code.
+    return env.get("ok") is True
+
+
 class RiverSession:
     def __init__(
         self,
@@ -47,6 +87,8 @@ class RiverSession:
         self.metrics = SessionMetrics()
         self.created_at = time.time()
         self.last_used_at = self.created_at
+        # Authoritative host-admitted train id only (admit-then-commit).
+        # Never publish a pending id before the sidecar admits the job.
         self.active_job_id: str | None = None
         self._mu = threading.RLock()
         self._sidecar = SolverSidecar(
@@ -222,8 +264,9 @@ class RiverSession:
     ) -> dict[str, Any]:
         params = clamp_solve_params(body if isinstance(body, dict) else {}, self.bounds)
         jid = job_id or f"job-{uuid.uuid4().hex[:12]}"
-        with self._mu:
-            self.active_job_id = jid
+        # Admit-then-commit: do not publish active_job_id until the host admits.
+        # A rejected busy second train must preserve the running job's id so
+        # default Stop/Pause target the authoritative active identity.
         started = time.perf_counter()
         env = self._sidecar.request(
             op,
@@ -235,6 +278,9 @@ class RiverSession:
         # Short-admit only — wall time accumulates while visitor polls status.
         self.metrics.note_solve_wall(time.perf_counter() - started)
         self.metrics.sample_pid(self._sidecar.pid)
+        if is_train_admission_success(env):
+            with self._mu:
+                self.active_job_id = jid
         return env
 
     def _control(
@@ -245,6 +291,8 @@ class RiverSession:
         timeout_s: float,
     ) -> dict[str, Any]:
         # Job-scoped: never cancel an unknown / stale id (AGENT_LESSONS).
+        # Default target is the admitted active id only — never a rejected
+        # pending train that never became active.
         with self._mu:
             jid = job_id or self.active_job_id
         if not jid:
