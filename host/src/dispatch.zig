@@ -7556,7 +7556,11 @@ test "exclusive mutation: Save/Open reservation blocks train begin and locks" {
     const dest = try std.fs.path.join(std.testing.allocator, &.{ abs, "should-not-exist.psol" });
     defer std.testing.allocator.free(dest);
 
+    // Fake reservation only — no io_thread. Clear before deinit (same pattern as
+    // job-scoped Stop tests); leaving the latch set is unsafe if anything waits
+    // on the busy flag during teardown.
     state.io_running.store(true, .release);
+    defer state.io_running.store(false, .release);
     try std.testing.expect(state.exclusiveMutationBusy());
     try std.testing.expectEqualStrings("save or open already running", state.exclusiveMutationBusyMessage());
     try std.testing.expectEqualStrings("save or open already running", trainAdmissionBusyReason(&state).?);
@@ -7671,7 +7675,13 @@ test "exclusive mutation: train/begin reservation blocks Save and Open" {
     const dest = try std.fs.path.join(std.testing.allocator, &.{ abs, "blocked-save.psol" });
     defer std.testing.allocator.free(dest);
 
+    // Fake train/begin latches only — no worker threads. Always clear both
+    // before HostState.deinit (mirrors job-scoped Stop/Pause tests).
     state.train_running.store(true, .release);
+    defer {
+        state.train_running.store(false, .release);
+        state.begin_running.store(false, .release);
+    }
     try std.testing.expect(state.exclusiveMutationBusy());
     try std.testing.expectEqualStrings("train already running", state.exclusiveMutationBusyMessage());
     try std.testing.expectEqualStrings("train already running", trainAdmissionBusyReason(&state).?);
