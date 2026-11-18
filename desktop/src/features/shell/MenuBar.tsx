@@ -205,6 +205,12 @@ export function MenuBar({
           setOpen={setOpenMenu}
           items={[
             {
+              label: "New solution",
+              onClick: () => {
+                onWorkspace("build");
+              },
+            },
+            {
               label: "Open solution…",
               onClick: () => {
                 openCatalogue("open");

@@ -121,6 +121,20 @@ describe("BuildWorkspace range tools", () => {
         pot: 10,
         stack: 100,
         boardText: "Ah Kd 2c",
+        oopFlop: "",
+        ipFlop: "",
+        oopFlopRaises: "",
+        ipFlopRaises: "",
+        oopTurn: "",
+        ipTurn: "",
+        oopTurnRaises: "",
+        ipTurnRaises: "",
+        oopRiver: "",
+        ipRiver: "",
+        oopRiverRaises: "",
+        ipRiverRaises: "",
+        oopTurnDonk: "",
+        oopRiverDonk: "",
       },
       weights: {
         oop: useStudyStore.getState().weights.oop,
@@ -199,16 +213,33 @@ describe("BuildWorkspace range tools", () => {
     expect(screen.queryByRole("dialog", { name: "Betting tree catalogue" })).toBeNull();
   });
 
-  it("lets the user type a paint weight into a number field", async () => {
+  it("lets the user type a paint weight percent into a number field", async () => {
     const user = userEvent.setup();
     render(<BuildWorkspace />);
     const input = screen.getByLabelText("Paint weight value") as HTMLInputElement;
-    expect(input.value).toBe("0.40");
+    expect(input.value).toBe("40");
     await user.clear(input);
-    await user.type(input, "0.75");
+    await user.type(input, "75");
     await user.tab();
     expect(useStudyStore.getState().paintWeight).toBeCloseTo(0.75, 5);
-    expect(input.value).toBe("0.75");
+    expect(input.value).toBe("75");
+  });
+
+  it("shows parsed size meaning while editing bet fields", async () => {
+    const user = userEvent.setup();
+    render(<BuildWorkspace />);
+    const flopOop = screen.getByLabelText("Flop OOP bets") as HTMLInputElement;
+    await user.clear(flopOop);
+    await user.type(flopOop, "1, 0.99, 2.5x, 20c");
+    expect(screen.getByText("1% pot, 99% pot, 2.5×, 20 chips")).toBeTruthy();
+  });
+
+  it("keeps board, range summaries, and river sizes above the betting-tree fold", () => {
+    render(<BuildWorkspace />);
+    expect(screen.getByLabelText("Spot")).toBeTruthy();
+    expect(screen.getByLabelText("Range summaries")).toBeTruthy();
+    expect(screen.getByLabelText("River OOP bets")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Solve" })).toBeTruthy();
   });
 
   it("shows cell weights under hand ids only for fractional weights", () => {
@@ -229,13 +260,13 @@ describe("BuildWorkspace range tools", () => {
   it("swaps OOP and IP range text without flipping layout labels", async () => {
     const user = userEvent.setup();
     render(<BuildWorkspace />);
-    expect(screen.getByRole("heading", { name: "OOP" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "IP" })).toBeTruthy();
+    expect(screen.getAllByRole("heading", { name: "OOP" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("heading", { name: "IP" }).length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: "Swap" }));
     expect(useStudyStore.getState().draft.oopRange).toBe("QQ+");
     expect(useStudyStore.getState().draft.ipRange).toBe("AA,KK");
-    expect(screen.getByRole("heading", { name: "OOP" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "IP" })).toBeTruthy();
+    expect(screen.getAllByRole("heading", { name: "OOP" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("heading", { name: "IP" }).length).toBeGreaterThan(0);
   });
 
   it("saves the current seat range into the catalogue and can edit it", async () => {

@@ -2414,7 +2414,7 @@
   padding: var(--space-3);
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
 /* Build page title + summary header. */
@@ -2441,6 +2441,202 @@
   align-items: center;
   font-size: 12px;
   color: var(--muted);
+}
+
+/* Memory estimate + primary Solve row. */
+.build-solve-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.build-solve-bar__pending {
+  font-size: 12px;
+}
+
+.build-spot {
+  gap: var(--space-2);
+}
+
+.build-range-summaries {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.build-range-summary {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--secondary);
+  min-width: 0;
+}
+
+.build-range-summary h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.build-range-summary__count {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.build-range-summary__text {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* Ranges + Betting tree side-by-side at desktop width. */
+.build-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.build-tree-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.build-tree-grid__head,
+.build-tree-grid__row {
+  display: grid;
+  grid-template-columns: 88px 1fr 1fr;
+  gap: 8px;
+  align-items: start;
+}
+
+.build-tree-grid__head {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.build-tree-grid__row-label {
+  font-size: 12px;
+  color: var(--muted);
+  padding-top: 6px;
+}
+
+.build-size-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 0;
+}
+
+.build-size-field input {
+  color: var(--text);
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
+  min-height: 26px;
+  width: 100%;
+}
+
+.build-size-preview {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-height: 14px;
+}
+
+.paint-weight-unit {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.startup-empty {
+  height: 100%;
+  overflow: auto;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 720px;
+}
+
+.startup-empty__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.startup-empty__recent-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.startup-empty__recent-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.startup-empty__list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.startup-empty__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.startup-empty__row-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.startup-empty__name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.startup-empty__meta {
+  color: var(--muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.startup-empty__empty {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 /* Two-column Build sections grid. */
@@ -3123,6 +3319,12 @@
   container-type: size;
 }
 
+/* Keep Build paint grids compact beside the betting tree. */
+.build-ranges .range-paint-grid {
+  width: 100%;
+  max-width: 100%;
+}
+
 /* One paintable hand-class cell in Build. */
 .paint-cell {
   border: 0;
@@ -3496,6 +3698,19 @@
   /* Two-column Build sections grid. */
   .build-grid {
     grid-template-columns: 1fr;
+  }
+
+  .build-main {
+    grid-template-columns: 1fr;
+  }
+
+  .build-range-summaries {
+    grid-template-columns: 1fr;
+  }
+
+  .build-tree-grid__head,
+  .build-tree-grid__row {
+    grid-template-columns: 72px 1fr 1fr;
   }
 }
 
@@ -4374,6 +4589,53 @@
   flex-wrap: wrap;
 }
 
+.library-header__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.library-search {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.library-search input {
+  color: var(--text);
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  min-height: 26px;
+  min-width: 220px;
+}
+
+.library-banner {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--secondary);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.library-section__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.library-recent-block {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
 /* Library page title header. — page heading. */
 .library-header h1 {
   margin: 0;
@@ -4587,20 +4849,19 @@
   }
 }
 
-/* Responsive overrides below 1280px width. */
-@media (max-width: 1280px) {
-  /* Keep workspace navigation reachable at the default Tauri 1280×800 size:
-     collapse the tab strip into a labeled select instead of hiding it. */
-  /* Full-width tab buttons (hidden on narrow layouts). */
+/* Compact select only below default desktop width (keep tabs at 1280×800). */
+@media (max-width: 1100px) {
   .workspace-switcher__tabs {
     display: none;
   }
 
-  /* Narrow-layout dropdown that replaces the tab strip. */
   .workspace-switcher__compact {
     display: inline-flex;
   }
+}
 
+/* Responsive overrides below 1280px width. */
+@media (max-width: 1280px) {
   /* Two-column equity histogram layout. */
   .equity-hist-grid {
     grid-template-columns: 1fr;

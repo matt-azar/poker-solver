@@ -63,6 +63,7 @@ describe("SolutionsCatalogue", () => {
     useStudyStore.setState({
       phase: "complete",
       solutionId: "sol-1",
+      connection: "connected",
       status: {
         running: false,
         paused: false,
@@ -119,7 +120,7 @@ describe("SolutionsCatalogue", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("saves a Continue checkpoint when Mode is Continue", async () => {
+  it("saves a Resumable checkpoint when Mode is Resumable checkpoint", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     render(<SolutionsCatalogue mode="save" onClose={onClose} />);
@@ -138,7 +139,7 @@ describe("SolutionsCatalogue", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("disables Continue mode without trainer state", () => {
+  it("disables Resumable checkpoint without trainer state", () => {
     useStudyStore.setState({
       status: {
         running: false,
@@ -154,8 +155,15 @@ describe("SolutionsCatalogue", () => {
     const mode = screen.getByLabelText("Save mode") as HTMLSelectElement;
     expect(mode.value).toBe("study");
     const continueOpt = within(mode).getByRole("option", {
-      name: "Continue",
+      name: "Resumable checkpoint",
     }) as HTMLOptionElement;
     expect(continueOpt.disabled).toBe(true);
+  });
+
+  it("hides the Save form in Open mode", () => {
+    render(<SolutionsCatalogue mode="open" onClose={vi.fn()} />);
+    expect(screen.getByText("Find a solution")).toBeTruthy();
+    expect(screen.queryByLabelText("Save mode")).toBeNull();
+    expect(screen.queryByLabelText("Name for saved solution")).toBeNull();
   });
 });

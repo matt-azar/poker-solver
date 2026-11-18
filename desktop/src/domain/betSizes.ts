@@ -216,6 +216,68 @@ function trimNumber(value: number): string {
 }
 
 /**
+ * Live Build-input preview for one size token while editing.
+ * Examples: `1` → `1% pot`, `0.99` → `99% pot`, `2.5x` → `2.5×`, `20c` → `20 chips`.
+ */
+export function formatSizeTokenPreview(token: string): string | null {
+  const raw = token.trim().toLowerCase();
+  if (!raw) {
+    return null;
+  }
+  if (raw === "a" || raw === "all-in" || raw === "allin") {
+    return "all-in";
+  }
+  const parsed = parseSizeTokenDetailed(token);
+  if (!parsed) {
+    return null;
+  }
+  if (parsed.geometric) {
+    return parsed.geometricStreets <= 0
+      ? "geometric"
+      : `${parsed.geometricStreets}-street geometric`;
+  }
+  if (parsed.raiseMultiple) {
+    return `${trimNumber(parsed.raiseMultipleValue)}×`;
+  }
+  if (parsed.fraction < 0) {
+    return `${trimNumber(-parsed.fraction)} chips`;
+  }
+  return `${trimNumber(parsed.fraction * 100)}% pot`;
+}
+
+/**
+ * Comma-list preview for a Build size field. Blank → empty string (no how-to copy).
+ * Lone `-` / `none` / `x` → `none`. Invalid tokens keep the raw text.
+ */
+export function formatSizeListPreview(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return "";
+  }
+  const parts = trimmed
+    .split(/[,]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (
+    parts.length === 1 &&
+    (parts[0] === "-" ||
+      parts[0].toLowerCase() === "none" ||
+      parts[0].toLowerCase() === "x")
+  ) {
+    return "none";
+  }
+  return parts
+    .map((part) => {
+      const lower = part.toLowerCase();
+      if (lower === "a" || lower === "all-in" || lower === "allin") {
+        return "all-in";
+      }
+      return formatSizeTokenPreview(part) ?? part;
+    })
+    .join(", ");
+}
+
+/**
  * One stored spec back into a Build token (`50`, `0.5%`, `e`, `2e`, `20c`, `2.5x`, `a`).
  * Percentages that would not round-trip as a bare Pio number are written with `%`.
  */
