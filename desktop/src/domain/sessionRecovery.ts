@@ -5,11 +5,197 @@
  * busy/cancel UI, ensure-fail, and host phase=failed — not scattered try/catch
  * bandaids. Callers mark the session dead or run `recoverEngineSession`; they
  * do not invent one-off reconnect logic.
+ *
+ * IPC audit §3 (2026-11-18): congestion / soft status timeouts / Ready-probe
+ * errors must not terminate a healthy child while Solving or with unsaved
+ * Complete solutions. Typed error class / phase / origin are preserved when
+ * present on EngineError-like inputs.
  */
 
-import type { SolvePhase, StatusPayload } from "./types";
+import type { SolvePhase } from "./types";
+import type { StatusPayload } from "./types";
 
-/** True when the IPC session/pipe is dead and Study must re-ensure. */
+/** Typed Rust `IpcError` classes (mirrored; domain must not import engine/). */
+export type IpcFaultClass =
+  | "queue_saturation"
+  | "timeout"
+  | "engine_rejection"
+  | "protocol_failure"
+  | "connection_loss"
+  | "unknown";
+
+/**
+ * Duck-typed EngineError / SolverIpcError fields the policy may read.
+ * Callers can pass the thrown error object; unknown shapes fall back to text.
+ */
+export type EngineFaultLike = {
+  message?: string;
+  detail?: string;
+  /** SolverIpcError.ipcClass */
+  ipcClass?: string | null;
+  /** Serde envelope `class` */
+  class?: string | null;
+  errorClass?: string | null;
+  /** Timeout phase (`before_write` / `after_write`) or host phase when present. */
+  phase?: string | null;
+  origin?: string | null;
+  op?: string | null;
+  requestId?: string | null;
+  request_id?: string | null;
+  launchId?: string | null;
+  launch_id?: string | null;
+  degraded?: boolean;
+  errorCode?: string | null;
+  error_code?: string | null;
+};
+
+/** Normalized fault view — preserves typed fields when present. */
+export type ClassifiedEngineFault = {
+  detail: string;
+  faultClass: IpcFaultClass;
+  /** True when faultClass came from a typed field, not text heuristics. */
+  classFromTypedField: boolean;
+  phase: string | null;
+  origin: string | null;
+  op: string | null;
+  requestId: string | null;
+  launchId: string | null;
+  degraded: boolean;
+  errorCode: string | null;
+  sessionDead: boolean;
+  congestion: boolean;
+  softTimeout: boolean;
+};
+
+export type StatusPollRecoveryReason =
+  | "hard_session_dead"
+  | "hung_threshold"
+  | "congestion_backoff"
+  | "soft_timeout_preserve"
+  | "below_threshold";
+
+/**
+ * Clear status-poll policy decision for Study watchdog wire-up.
+ * Prefer this over composing mark-dead + terminate independently.
+ */
+export type StatusPollRecoveryDecision = {
+  markDead: boolean;
+  terminate: boolean;
+  reason: StatusPollRecoveryReason;
+  fault: ClassifiedEngineFault;
+};
+
+export type ReadyProbeObservation =
+  | "process_exit"
+  | "failed_connection"
+  | "missed_observation"
+  | "congestion"
+  | "engine_rejection"
+  | "unknown";
+
+/**
+ * Ready / ensure probe against an already-running child.
+ * Timeout and admission must not auto-teardown; missing class fails closed
+ * toward preserve + explicit restart semantics.
+ */
+export type ReadyProbeRecoveryDecision = {
+  /** Tear down the existing connection / child. */
+  teardown: boolean;
+  /** Offer an explicit Restart (unsaved work may be lost) — never silent. */
+  explicitRestart: boolean;
+  /** Keep the existing child; treat as backoff / missed observation. */
+  preserve: boolean;
+  observation: ReadyProbeObservation;
+  reason: string;
+  fault: ClassifiedEngineFault;
+};
+
+const IPC_FAULT_CLASSES: ReadonlySet<string> = new Set([
+  "queue_saturation",
+  "timeout",
+  "engine_rejection",
+  "protocol_failure",
+  "connection_loss",
+]);
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object") return null;
+  return value as Record<string, unknown>;
+}
+
+function readStringField(
+  record: Record<string, unknown> | null,
+  ...keys: string[]
+): string | null {
+  if (!record) return null;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function normalizeIpcFaultClass(raw: string | null | undefined): IpcFaultClass | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (IPC_FAULT_CLASSES.has(trimmed)) {
+    return trimmed as IpcFaultClass;
+  }
+  return null;
+}
+
+/** Extract a typed class from EngineError-like / SolverIpcError-like inputs. */
+export function readTypedIpcFaultClass(input: unknown): IpcFaultClass | null {
+  if (input == null) return null;
+  if (typeof input === "string") return null;
+  const record = asRecord(input);
+  if (!record) return null;
+  return (
+    normalizeIpcFaultClass(
+      typeof record.ipcClass === "string" ? record.ipcClass : null,
+    ) ??
+    normalizeIpcFaultClass(typeof record.class === "string" ? record.class : null) ??
+    normalizeIpcFaultClass(
+      typeof record.errorClass === "string" ? record.errorClass : null,
+    ) ??
+    normalizeIpcFaultClass(
+      typeof record.error_class === "string" ? record.error_class : null,
+    )
+  );
+}
+
+/** Infer class from detail text when no typed field is present. */
+export function inferIpcFaultClassFromDetail(detail: string): IpcFaultClass {
+  const text = detail.toLowerCase();
+  if (
+    text.includes("connection_loss") ||
+    text.includes("pipe closed") ||
+    text.includes("broken pipe") ||
+    text.includes("sidecar_exit") ||
+    text.includes("solver-engine exiting") ||
+    text.includes("session killed") ||
+    text.includes("session shut down")
+  ) {
+    return "connection_loss";
+  }
+  if (isAdmissionSaturationDetail(detail)) {
+    return "queue_saturation";
+  }
+  if (isSoftRpcTimeoutDetail(detail)) {
+    return "timeout";
+  }
+  if (text.includes("invalidframe") || text.includes("invalid_frame") || text.includes("malformed ipc")) {
+    return "protocol_failure";
+  }
+  return "unknown";
+}
+
+/**
+ * True when the IPC session/pipe is dead and Study must re-ensure.
+ * Congestion / soft timeouts are intentionally excluded.
+ */
 export function isEngineSessionDead(detail: string): boolean {
   const text = detail.toLowerCase();
   return (
@@ -33,18 +219,74 @@ export function isEngineSessionDead(detail: string): boolean {
   );
 }
 
+/** Admission / queue saturation — congestion, not process death. */
+export function isAdmissionSaturationDetail(detail: string): boolean {
+  const text = detail.toLowerCase();
+  return (
+    text.includes("admission saturated") ||
+    text.includes("queue_saturation") ||
+    text.includes("queue saturation") ||
+    text.includes("queued bytes")
+  );
+}
+
+export function isCongestionFault(fault: Pick<ClassifiedEngineFault, "faultClass" | "detail" | "congestion">): boolean {
+  return fault.congestion || fault.faultClass === "queue_saturation" || isAdmissionSaturationDetail(fault.detail);
+}
+
+/**
+ * Normalize an EngineError-like / string / unknown into a classified fault,
+ * preserving typed class / phase / origin / launch when present.
+ */
+export function classifyEngineFault(input: unknown): ClassifiedEngineFault {
+  const record = asRecord(input);
+  const typedClass = readTypedIpcFaultClass(input);
+  const detailFromFields =
+    (typeof record?.detail === "string" && record.detail.trim()) ||
+    (typeof record?.message === "string" && record.message.trim()) ||
+    "";
+  const detail =
+    detailFromFields ||
+    (input instanceof Error
+      ? input.message.trim()
+      : typeof input === "string"
+        ? input.trim()
+        : "") ||
+    "engine fault";
+
+  const faultClass = typedClass ?? inferIpcFaultClassFromDetail(detail);
+  const congestion =
+    faultClass === "queue_saturation" || isAdmissionSaturationDetail(detail);
+  const softTimeout =
+    faultClass === "timeout" || (!congestion && isSoftRpcTimeoutDetail(detail));
+  const sessionDead =
+    faultClass === "connection_loss" ||
+    (faultClass === "protocol_failure" && isEngineSessionDead(detail)) ||
+    (!typedClass && !congestion && !softTimeout && isEngineSessionDead(detail));
+
+  return {
+    detail,
+    faultClass,
+    classFromTypedField: typedClass != null,
+    phase: readStringField(record, "phase"),
+    origin: readStringField(record, "origin"),
+    op: readStringField(record, "op"),
+    requestId: readStringField(record, "requestId", "request_id"),
+    launchId: readStringField(record, "launchId", "launch_id"),
+    degraded: record?.degraded === true,
+    errorCode: readStringField(record, "errorCode", "error_code"),
+    sessionDead,
+    congestion,
+    softTimeout,
+  };
+}
+
 export function classifyEngineSessionFault(error: unknown): {
   sessionDead: boolean;
   detail: string;
 } {
-  const raw =
-    error instanceof Error
-      ? error.message
-      : typeof error === "string"
-        ? error
-        : "engine fault";
-  const detail = raw.trim() || "engine fault";
-  return { sessionDead: isEngineSessionDead(detail), detail };
+  const fault = classifyEngineFault(error);
+  return { sessionDead: fault.sessionDead, detail: fault.detail };
 }
 
 /** UI phases that block Solve/Continue until recovery clears them. */
@@ -222,10 +464,11 @@ export function statusIndicatesFailure(
 export const STATUS_POLL_DEAD_AFTER_FAILURES = 3;
 
 /**
- * Soft status timeouts during these phases must not paint disconnected or kill
- * the sidecar. Packaged flop build/train can CPU-saturate Windows so status
- * exceeds the poll budget while the engine is healthy (hot CPU, growing RSS).
- * Killing after 3× soft timeouts aborts a working solve (debug 2026-11-14).
+ * Soft status timeouts / congestion during these phases must not paint
+ * disconnected or kill the sidecar. Packaged flop build/train can CPU-saturate
+ * Windows so status exceeds the poll budget while the engine is healthy.
+ * Complete is included so an unsaved published solution is not torn down by
+ * ordinary late polls (IPC audit §3).
  */
 export function softStatusTimeoutPreservesSession(phase: SolvePhase): boolean {
   return (
@@ -233,23 +476,66 @@ export function softStatusTimeoutPreservesSession(phase: SolvePhase): boolean {
     phase === "solving" ||
     phase === "pause_requested" ||
     phase === "stop_requested" ||
-    phase === "analysis_pending"
+    phase === "analysis_pending" ||
+    phase === "complete"
   );
 }
 
-/**
- * Decide whether a status-poll failure should paint Reconnect / unreachable.
- * Transient decode/timeout blips must not flicker "Engine unreachable" over a
- * healthy sidecar (ZR-148).
- */
-export function shouldMarkStatusPollDead(args: {
+type StatusPollPolicyArgs = {
   consecutiveFailures: number;
   detail: string;
   threshold?: number;
   /** Current Study phase — soft timeouts preserve session while train/EV busy. */
   phase?: SolvePhase;
-}): boolean {
-  // Preconditions: failure counts are non-negative; threshold is at least 1.
+  /**
+   * Optional EngineError-like / SolverIpcError input. When present, typed
+   * class/phase/origin win over detail-text heuristics.
+   */
+  error?: unknown;
+};
+
+function resolvePollFault(args: StatusPollPolicyArgs): ClassifiedEngineFault {
+  if (args.error !== undefined) {
+    const fromError = classifyEngineFault(args.error);
+    // Prefer an explicit detail string when the caller already composed one
+    // (e.g. status detail + shell hint), but keep typed fields from error.
+    if (args.detail.trim() && args.detail.trim() !== fromError.detail) {
+      const fromDetail = classifyEngineFault(args.detail);
+      return {
+        ...fromError,
+        detail: args.detail.trim(),
+        // Typed class stays authoritative when present.
+        faultClass: fromError.classFromTypedField
+          ? fromError.faultClass
+          : fromDetail.faultClass,
+        congestion:
+          fromError.congestion ||
+          fromDetail.congestion ||
+          isAdmissionSaturationDetail(args.detail),
+        softTimeout:
+          fromError.softTimeout ||
+          fromDetail.softTimeout ||
+          isSoftRpcTimeoutDetail(args.detail),
+        sessionDead:
+          fromError.sessionDead ||
+          (!fromError.classFromTypedField &&
+            !fromError.congestion &&
+            !fromDetail.congestion &&
+            isEngineSessionDead(args.detail)),
+      };
+    }
+    return fromError;
+  }
+  return classifyEngineFault(args.detail);
+}
+
+/**
+ * Single status-poll recovery decision (audit §3).
+ * Congestion and preserve-phase soft timeouts never mark dead or terminate.
+ */
+export function decideStatusPollRecovery(
+  args: StatusPollPolicyArgs,
+): StatusPollRecoveryDecision {
   if (args.consecutiveFailures < 0) {
     throw new Error("contract: consecutiveFailures must be >= 0");
   }
@@ -257,40 +543,149 @@ export function shouldMarkStatusPollDead(args: {
   if (threshold < 1) {
     throw new Error("contract: status-poll dead threshold must be >= 1");
   }
-  // Positive: hard session-dead faults paint immediately (even at 0 soft blips).
-  if (isEngineSessionDead(args.detail)) {
-    return true;
+  const fault = resolvePollFault(args);
+
+  if (fault.sessionDead || isEngineSessionDead(fault.detail)) {
+    return {
+      markDead: true,
+      terminate: true,
+      reason: "hard_session_dead",
+      fault: { ...fault, sessionDead: true },
+    };
   }
-  // Soft timeout while compile/train/EV is expected: backoff only — do not
-  // declare session-dead (false hung-kill under Windows CPU saturation).
+
+  if (isCongestionFault(fault)) {
+    return {
+      markDead: false,
+      terminate: false,
+      reason: "congestion_backoff",
+      fault: { ...fault, congestion: true },
+    };
+  }
+
   if (
+    fault.softTimeout &&
     args.phase != null &&
-    softStatusTimeoutPreservesSession(args.phase) &&
-    isSoftRpcTimeoutDetail(args.detail)
+    softStatusTimeoutPreservesSession(args.phase)
   ) {
-    return false;
+    return {
+      markDead: false,
+      terminate: false,
+      reason: "soft_timeout_preserve",
+      fault,
+    };
   }
-  // Negative: soft blips stay alive until the threshold.
-  return args.consecutiveFailures >= threshold;
+
+  if (args.consecutiveFailures >= threshold) {
+    return {
+      markDead: true,
+      terminate: true,
+      reason: "hung_threshold",
+      fault,
+    };
+  }
+
+  return {
+    markDead: false,
+    terminate: false,
+    reason: "below_threshold",
+    fault,
+  };
 }
 
 /**
- * ZR-151: after N soft status failures Study may kill the sidecar (hung host)
- * then Reconnect. Hard pipe-death faults already imply a dead process.
- * Soft timeouts alone must not look like "kill the train" — only the hung
- * threshold path terminates, and never during active build/train/EV (above).
+ * Decide whether a status-poll failure should paint Reconnect / unreachable.
+ * Transient decode/timeout blips must not flicker "Engine unreachable" over a
+ * healthy sidecar (ZR-148). Congestion is backoff only (IPC audit §3).
  */
-export function shouldTerminateHungSidecar(args: {
-  consecutiveFailures: number;
-  detail: string;
-  threshold?: number;
-  phase?: SolvePhase;
-}): boolean {
-  if (isEngineSessionDead(args.detail)) {
-    // Pipe already dead — kill is best-effort cleanup, still useful.
-    return true;
+export function shouldMarkStatusPollDead(args: StatusPollPolicyArgs): boolean {
+  return decideStatusPollRecovery(args).markDead;
+}
+
+/**
+ * ZR-151 / IPC audit §3: after N soft status failures Study may kill the
+ * sidecar (hung host) then Reconnect — but never for congestion, and never for
+ * soft timeouts while Solving / Complete (unsaved solution still in child).
+ * Hard pipe-death faults already imply a dead process.
+ */
+export function shouldTerminateHungSidecar(args: StatusPollPolicyArgs): boolean {
+  return decideStatusPollRecovery(args).terminate;
+}
+
+/**
+ * Ready probe / ensure against an existing child (IPC audit §3 row 4).
+ * Do not tear down solely from timeout or admission text. When the error class
+ * is missing, fail closed toward preserve + explicit restart semantics.
+ */
+export function decideReadyProbeOnExistingChild(
+  error: unknown,
+): ReadyProbeRecoveryDecision {
+  const fault = classifyEngineFault(error);
+
+  if (fault.faultClass === "connection_loss" || fault.sessionDead) {
+    const processExit =
+      /sidecar_exit|solver-engine exiting|session killed|process (exited|exit)/i.test(
+        fault.detail,
+      );
+    return {
+      teardown: true,
+      explicitRestart: false,
+      preserve: false,
+      observation: processExit ? "process_exit" : "failed_connection",
+      reason: processExit
+        ? "observed process exit — teardown existing child"
+        : "failed connection / pipe death — teardown existing child",
+      fault,
+    };
   }
-  return shouldMarkStatusPollDead(args);
+
+  if (fault.congestion || fault.faultClass === "queue_saturation") {
+    return {
+      teardown: false,
+      explicitRestart: true,
+      preserve: true,
+      observation: "congestion",
+      reason:
+        "admission/queue saturation on Ready probe — preserve child; offer explicit restart",
+      fault,
+    };
+  }
+
+  if (fault.softTimeout || fault.faultClass === "timeout") {
+    return {
+      teardown: false,
+      explicitRestart: true,
+      preserve: true,
+      observation: "missed_observation",
+      reason:
+        "Ready probe timeout — missed observation, not proof of death; preserve child",
+      fault,
+    };
+  }
+
+  if (fault.faultClass === "engine_rejection") {
+    return {
+      teardown: false,
+      explicitRestart: true,
+      preserve: true,
+      observation: "engine_rejection",
+      reason:
+        "engine rejected Ready probe — preserve child; offer explicit restart",
+      fault,
+    };
+  }
+
+  // Class missing or unknown: fail closed toward preserve + explicit restart.
+  return {
+    teardown: false,
+    explicitRestart: true,
+    preserve: true,
+    observation: "unknown",
+    reason: fault.classFromTypedField
+      ? "non-fatal Ready probe fault — preserve child; offer explicit restart"
+      : "Ready probe error class missing — fail closed: preserve child + explicit restart",
+    fault,
+  };
 }
 
 /**
@@ -302,7 +697,9 @@ export function isSoftRpcTimeoutDetail(detail: string): boolean {
   return (
     text.includes("timed out") ||
     text.includes("timeout") ||
-    text.includes("recv timeout")
+    text.includes("recv timeout") ||
+    text.includes("expired-before-write") ||
+    text.includes("unknown-after-write")
   );
 }
 
