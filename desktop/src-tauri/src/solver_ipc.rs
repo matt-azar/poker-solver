@@ -18,6 +18,11 @@ use tokio::sync::oneshot;
 /// Protocol version spoken by Zig `solver-engine` and the test sidecar.
 pub const PROTOCOL: u32 = 2;
 
+/// Protocol-2 hard payload ceiling (JSON body after the u32 length prefix).
+/// Matches Zig `ipc.max_payload_bytes` / host input framing (16 MiB). Admission
+/// queued-byte budgets remain a separate limit.
+pub const MAX_PAYLOAD_BYTES: usize = 16 * 1024 * 1024;
+
 /// Cap on retained diagnostic samples per launch (bounded ring).
 pub const DIAG_RING_CAP: usize = 64;
 
@@ -295,7 +300,11 @@ pub enum ReplyValidation {
     Reject(IpcError),
 }
 
-/// Validate protocol version, request id, op, and job id where applicable.
+/// Validate protocol version, request id, and required final-reply fields.
+///
+/// Progress frames are modelled separately (`kind == "progress"` → Ignore).
+/// Final replies require `op`, boolean `ok`, and a job echo when the request
+/// carried a `job_id` (audit §6 / Single prompt §5).
 pub fn validate_reply(
     reply: &Value,
     pending: Option<&PendingWaiter>,
@@ -331,8 +340,18 @@ pub fn validate_reply(
         // Orphan / late after timeout — drop (launch-scoped: never invent state).
         return ReplyValidation::Ignore("orphan");
     };
-    let reply_op = reply.get("op").and_then(|x| x.as_str()).unwrap_or("");
-    if !reply_op.is_empty() && reply_op != waiter.op {
+
+    let reply_op = match reply.get("op").and_then(|x| x.as_str()) {
+        Some(op) if !op.is_empty() => op,
+        _ => {
+            return ReplyValidation::Reject(IpcError::protocol_failure(
+                format!("final reply missing op (request {expected_request_id})"),
+                Some(expected_request_id.to_string()),
+                Some(waiter.op.clone()),
+            ));
+        }
+    };
+    if reply_op != waiter.op {
         return ReplyValidation::Reject(IpcError::protocol_failure(
             format!(
                 "reply op mismatch: got {reply_op}, expected {} (request {expected_request_id})",
@@ -342,18 +361,27 @@ pub fn validate_reply(
             Some(waiter.op.clone()),
         ));
     }
-    // Job id: when the request carried one, the reply must echo it (or null-only
-    // when both sides omit). Mismatch is a protocol failure for that waiter.
+
+    match reply.get("ok") {
+        Some(Value::Bool(_)) => {}
+        _ => {
+            return ReplyValidation::Reject(IpcError::protocol_failure(
+                format!("final reply missing boolean ok (request {expected_request_id})"),
+                Some(expected_request_id.to_string()),
+                Some(waiter.op.clone()),
+            ));
+        }
+    }
+
+    // When the request carried a job_id, the final reply must echo it.
     if let Some(ref expected_job) = waiter.job_id {
-        let reply_job = reply
-            .get("job_id")
-            .and_then(|x| {
-                if x.is_null() {
-                    None
-                } else {
-                    x.as_str().map(|s| s.to_string())
-                }
-            });
+        let reply_job = reply.get("job_id").and_then(|x| {
+            if x.is_null() {
+                None
+            } else {
+                x.as_str().map(|s| s.to_string())
+            }
+        });
         match reply_job {
             Some(ref got) if got == expected_job => {}
             Some(got) => {
@@ -367,8 +395,14 @@ pub fn validate_reply(
                 ));
             }
             None => {
-                // Host may omit job_id on some replies; treat absent as soft OK
-                // when we sent one (Zig sometimes echoes null). Not a hard fault.
+                return ReplyValidation::Reject(IpcError::protocol_failure(
+                    format!(
+                        "final reply missing job_id echo (expected {expected_job}, \
+                         request {expected_request_id})"
+                    ),
+                    Some(expected_request_id.to_string()),
+                    Some(waiter.op.clone()),
+                ));
             }
         }
     }
@@ -543,6 +577,92 @@ mod tests {
             validate_reply(&reply, None, "r-late"),
             ReplyValidation::Ignore("orphan")
         ));
+    }
+
+    #[test]
+    fn progress_frames_are_ignored_separately_from_final_replies() {
+        let reply = json!({
+            "v": 2,
+            "kind": "progress",
+            "request_id": "r-job-1",
+            "job_id": "job-42",
+            "op": "status",
+            "body": {"phase": "Solving"}
+        });
+        let waiter = PendingWaiter {
+            tx: oneshot::channel().0,
+            op: "status".into(),
+            job_id: Some("job-42".into()),
+            admitted_at: Instant::now(),
+            wrote_at: None,
+        };
+        assert!(matches!(
+            validate_reply(&reply, Some(&waiter), "r-job-1"),
+            ReplyValidation::Ignore("progress")
+        ));
+    }
+
+    fn load_ipc_fixture(rel: &str) -> Value {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../host/testdata/ipc")
+            .join(rel);
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        serde_json::from_str(&text).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()))
+    }
+
+    fn status_waiter_with_job() -> PendingWaiter {
+        PendingWaiter {
+            tx: oneshot::channel().0,
+            op: "status".into(),
+            job_id: Some("job-42".into()),
+            admitted_at: Instant::now(),
+            wrote_at: None,
+        }
+    }
+
+    #[test]
+    fn fixtures_valid_baseline_reply_accepted() {
+        let reply = load_ipc_fixture("malformed_reply/valid_baseline.reply.json");
+        let waiter = status_waiter_with_job();
+        assert!(matches!(
+            validate_reply(&reply, Some(&waiter), "r-job-1"),
+            ReplyValidation::Ok
+        ));
+    }
+
+    #[test]
+    fn fixtures_reject_missing_op_ok_and_job_echo() {
+        let waiter = status_waiter_with_job();
+        for (rel, needle) in [
+            ("malformed_reply/missing_op.reply.json", "missing op"),
+            ("malformed_reply/missing_ok.reply.json", "missing boolean ok"),
+            (
+                "malformed_reply/missing_job_echo.reply.json",
+                "missing job_id echo",
+            ),
+        ] {
+            let reply = load_ipc_fixture(rel);
+            match validate_reply(&reply, Some(&waiter), "r-job-1") {
+                ReplyValidation::Reject(IpcError::ProtocolFailure { message, .. }) => {
+                    assert!(
+                        message.contains(needle),
+                        "{rel}: expected `{needle}` in {message}"
+                    );
+                }
+                other => panic!("{rel}: expected reject, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn max_payload_bytes_matches_protocol_ceiling_fixture() {
+        let ceiling_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../host/testdata/ipc/boundary/CEILING.txt");
+        let text = std::fs::read_to_string(&ceiling_path).expect("CEILING.txt");
+        let ceiling: usize = text.trim().parse().expect("ceiling decimal");
+        assert_eq!(ceiling, MAX_PAYLOAD_BYTES);
+        assert_eq!(MAX_PAYLOAD_BYTES, 16 * 1024 * 1024);
     }
 
     #[test]

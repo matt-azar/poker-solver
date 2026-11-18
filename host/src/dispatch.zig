@@ -410,26 +410,94 @@ pub const HostState = struct {
     }
 };
 
-fn bodyStringField(body: []const u8, key: []const u8) ?[]const u8 {
-    var needle_buf: [64]u8 = undefined;
-    const needle = std.fmt.bufPrint(&needle_buf, "\"{s}\":\"", .{key}) catch return null;
-    const start = std.mem.indexOf(u8, body, needle) orelse return null;
-    var i = start + needle.len;
-    const from = i;
-    while (i < body.len) : (i += 1) {
-        if (body[i] == '\\') {
-            i += 1;
+/// Structural classification of a JSON string field on an operation body.
+/// Distinguishes omitted keys from present-but-invalid values (audit §6).
+const BodyStringField = union(enum) {
+    omitted,
+    /// Key present but not a JSON string (null, number, object, array, bool).
+    invalid,
+    /// Raw escaped contents between quotes — slice into the original body bytes.
+    raw: []const u8,
+};
+
+/// Locate raw JSON string contents for `key` in `body` (whitespace-tolerant).
+/// Returns a slice into `body` of the still-escaped characters between quotes.
+fn findRawJsonStringContents(body: []const u8, key: []const u8) ?[]const u8 {
+    var needle_buf: [72]u8 = undefined;
+    const needle = std.fmt.bufPrint(&needle_buf, "\"{s}\"", .{key}) catch return null;
+    var search_from: usize = 0;
+    while (search_from < body.len) {
+        const start = std.mem.indexOfPos(u8, body, search_from, needle) orelse return null;
+        var i = start + needle.len;
+        while (i < body.len and std.ascii.isWhitespace(body[i])) : (i += 1) {}
+        if (i >= body.len or body[i] != ':') {
+            search_from = start + 1;
             continue;
         }
-        if (body[i] == '"') return body[from..i];
+        i += 1;
+        while (i < body.len and std.ascii.isWhitespace(body[i])) : (i += 1) {}
+        if (i >= body.len or body[i] != '"') return null;
+        i += 1;
+        const from = i;
+        while (i < body.len) : (i += 1) {
+            if (body[i] == '\\') {
+                i += 1;
+                continue;
+            }
+            if (body[i] == '"') return body[from..i];
+        }
+        return null;
     }
     return null;
 }
 
-/// Unescape a JSON string field (paths, etc.) — do not return raw escaped bytes (ZR-92).
+/// Parse the operation body with `std.json` and classify `key`.
+/// Compact and spaced encodings of the same object agree.
+fn bodyStringFieldKind(body: []const u8, key: []const u8) error{InvalidBody}!BodyStringField {
+    const trimmed = std.mem.trim(u8, body, &std.ascii.whitespace);
+    const src = if (trimmed.len == 0) "{}" else body;
+    var stack = std.heap.stackFallback(64 * 1024, std.heap.page_allocator);
+    const allocator = stack.get();
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, src, .{}) catch return error.InvalidBody;
+    defer parsed.deinit();
+    const obj = switch (parsed.value) {
+        .object => |o| o,
+        else => return error.InvalidBody,
+    };
+    const val = obj.get(key) orelse return .omitted;
+    return switch (val) {
+        .string => {
+            const raw = findRawJsonStringContents(body, key) orelse return .invalid;
+            return .{ .raw = raw };
+        },
+        else => .invalid,
+    };
+}
+
+/// Soft string lookup: omitted or invalid → null. Present string → raw escaped slice into `body`.
+fn bodyStringField(body: []const u8, key: []const u8) ?[]const u8 {
+    return switch (bodyStringFieldKind(body, key) catch return null) {
+        .omitted, .invalid => null,
+        .raw => |r| r,
+    };
+}
+
+/// Unescape a JSON string field (paths, etc.) via `std.json` (ZR-92 / audit §6).
+/// Returns owned UTF-8; omitted or non-string → null.
 fn bodyUnescapedStringField(allocator: std.mem.Allocator, body: []const u8, key: []const u8) !?[]u8 {
-    const escaped = bodyStringField(body, key) orelse return null;
-    return try ipc.unescapeJsonString(allocator, escaped);
+    const trimmed = std.mem.trim(u8, body, &std.ascii.whitespace);
+    const src = if (trimmed.len == 0) "{}" else body;
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, src, .{}) catch return null;
+    defer parsed.deinit();
+    const obj = switch (parsed.value) {
+        .object => |o| o,
+        else => return null,
+    };
+    const val = obj.get(key) orelse return null;
+    return switch (val) {
+        .string => |s| try allocator.dupe(u8, s),
+        else => null,
+    };
 }
 
 fn bodyIntField(body: []const u8, key: []const u8) ?i32 {
@@ -1628,8 +1696,14 @@ fn resolveLocatedNode(
     game: poker_engine.game.CompiledGame,
     body_json: []const u8,
 ) poker_engine.analysis.node_id.NodeIdError!poker_engine.analysis.node_id.ParsedNodeId {
-    if (bodyStringField(body_json, "node_id")) |text| {
-        return poker_engine.analysis.node_id.locateNode(game, text);
+    // Omitted root selection ≠ present-but-invalid `node_id` (audit §6).
+    switch (bodyStringFieldKind(body_json, "node_id") catch return error.UnknownNode) {
+        .omitted => {},
+        .invalid => return error.UnknownNode,
+        .raw => |text| {
+            if (text.len == 0) return error.UnknownNode;
+            return poker_engine.analysis.node_id.locateNode(game, text);
+        },
     }
     const node_index: u32 = @intCast(bodyIntField(body_json, "node_index") orelse 0);
     const turn = bodyIntField(body_json, "turn") orelse -1;
@@ -6724,4 +6798,143 @@ test "reallocated s1 after replacement still validates expected identity" {
     try std.testing.expect(!reply.ok);
     try std.testing.expectEqualStrings("expired_solution", reply.error_code orelse "");
     try std.testing.expectEqual(second, state.session.solution_id);
+}
+
+fn readIpcFixture(comptime rel: []const u8) ![]u8 {
+    return std.fs.cwd().readFileAlloc(
+        std.testing.allocator,
+        "host/testdata/ipc/" ++ rel,
+        64 * 1024,
+    );
+}
+
+test "bodyStringFieldKind: compact and spaced node_select fixtures agree" {
+    const compact = try readIpcFixture("node_select/compact.body.json");
+    defer std.testing.allocator.free(compact);
+    const spaced = try readIpcFixture("node_select/spaced.body.json");
+    defer std.testing.allocator.free(spaced);
+
+    const compact_raw = switch (try bodyStringFieldKind(compact, "node_id")) {
+        .raw => |r| r,
+        else => return error.TestUnexpectedResult,
+    };
+    const spaced_raw = switch (try bodyStringFieldKind(spaced, "node_id")) {
+        .raw => |r| r,
+        else => return error.TestUnexpectedResult,
+    };
+    try std.testing.expectEqualStrings("p1.t-1.r-1", compact_raw);
+    try std.testing.expectEqualStrings("p1.t-1.r-1", spaced_raw);
+    try std.testing.expectEqualStrings(compact_raw, spaced_raw);
+    try std.testing.expectEqualStrings("p1.t-1.r-1", bodyStringField(spaced, "node_id").?);
+}
+
+test "bodyStringFieldKind: omitted root selection ≠ present-but-invalid" {
+    try std.testing.expect(switch (try bodyStringFieldKind("{}", "node_id")) {
+        .omitted => true,
+        else => false,
+    });
+    try std.testing.expect(switch (try bodyStringFieldKind("{\"foo\":1}", "node_id")) {
+        .omitted => true,
+        else => false,
+    });
+    try std.testing.expect(switch (try bodyStringFieldKind("{\"node_id\":null}", "node_id")) {
+        .invalid => true,
+        else => false,
+    });
+    try std.testing.expect(switch (try bodyStringFieldKind("{\"node_id\":123}", "node_id")) {
+        .invalid => true,
+        else => false,
+    });
+    try std.testing.expect(switch (try bodyStringFieldKind("{\"node_id\":true}", "node_id")) {
+        .invalid => true,
+        else => false,
+    });
+    // Soft lookup collapses invalid to miss; Kind preserves the distinction.
+    try std.testing.expect(bodyStringField("{\"node_id\":null}", "node_id") == null);
+    try std.testing.expect(bodyStringField("{}", "node_id") == null);
+}
+
+test "compact and spaced node_select fixtures select the same child" {
+    const config =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1,2d2h:1
+        \\ip-range AsQs:1,2d2h:1
+        \\oop-river-bets 1
+        \\ip-river-bets 1
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "spaced-json-node");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(1);
+
+    const compact_body = try readIpcFixture("node_select/compact.body.json");
+    defer std.testing.allocator.free(compact_body);
+    const spaced_body = try readIpcFixture("node_select/spaced.body.json");
+    defer std.testing.allocator.free(spaced_body);
+
+    var compact_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "node-compact"),
+        .op = try std.testing.allocator.dupe(u8, "node"),
+        .body_json = try std.testing.allocator.dupe(u8, compact_body),
+    };
+    defer compact_req.deinit();
+    var compact_reply = try handle(&state, compact_req);
+    defer compact_reply.deinit();
+    try std.testing.expect(compact_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, compact_reply.body_json, "\"node_id\":\"p1.t-1.r-1\"") != null);
+
+    var spaced_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "node-spaced"),
+        .op = try std.testing.allocator.dupe(u8, "node"),
+        .body_json = try std.testing.allocator.dupe(u8, spaced_body),
+    };
+    defer spaced_req.deinit();
+    var spaced_reply = try handle(&state, spaced_req);
+    defer spaced_reply.deinit();
+    try std.testing.expect(spaced_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, spaced_reply.body_json, "\"node_id\":\"p1.t-1.r-1\"") != null);
+
+    // Present-but-invalid must not fall back to root (omitted would yield p0).
+    var invalid_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "node-invalid"),
+        .op = try std.testing.allocator.dupe(u8, "node"),
+        .body_json = try std.testing.allocator.dupe(u8, "{\"node_id\": null}"),
+    };
+    defer invalid_req.deinit();
+    var invalid_reply = try handle(&state, invalid_req);
+    defer invalid_reply.deinit();
+    try std.testing.expect(!invalid_reply.ok);
+    try std.testing.expectEqualStrings("unknown_node", invalid_reply.error_code orelse "");
+
+    var omitted_req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "node-omitted"),
+        .op = try std.testing.allocator.dupe(u8, "node"),
+        .body_json = try std.testing.allocator.dupe(u8, "{}"),
+    };
+    defer omitted_req.deinit();
+    var omitted_reply = try handle(&state, omitted_req);
+    defer omitted_reply.deinit();
+    try std.testing.expect(omitted_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, omitted_reply.body_json, "\"node_id\":\"p0.t-1.r-1\"") != null);
 }
