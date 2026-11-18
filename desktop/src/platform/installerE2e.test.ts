@@ -208,12 +208,42 @@ describe("maybeRunInstallerE2eAndExit IPC probe stages", () => {
     invoke.mockReset();
   });
 
-  it("runs BlockedWrite via STUDY_INSTALLER_E2E=stage-blocked-write (skip path)", async () => {
+  it("runs BlockedWrite via STUDY_INSTALLER_E2E=stage-blocked-write (fail when unarmed)", async () => {
     const { maybeRunInstallerE2eAndExit } = await import("./installerE2e");
     invoke.mockImplementation(async (cmd: string) => {
       if (cmd === "installer_e2e_stage") return "stage-blocked-write";
       if (cmd === "ensure_solver_engine") return { ok: true };
-      if (cmd === "solver_engine_request") return { ok: true, body: {} };
+      if (cmd === "ipc_blocked_write_armed") return false;
+      if (cmd === "solver_engine_extra_args") return [];
+      if (cmd === "exit_with_code") return null;
+      throw new Error(`unexpected invoke ${cmd}`);
+    });
+    const handled = await maybeRunInstallerE2eAndExit();
+    expect(handled).toBe(true);
+    expect(invoke).toHaveBeenCalledWith("exit_with_code", { code: 1 });
+  });
+
+  it("runs BlockedWrite PASS when arm + write bound are observed", async () => {
+    const { maybeRunInstallerE2eAndExit } = await import("./installerE2e");
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "installer_e2e_stage") return "stage-blocked-write";
+      if (cmd === "ensure_solver_engine") return { ok: true };
+      if (cmd === "ipc_blocked_write_armed") return true;
+      if (cmd === "solver_engine_extra_args") {
+        return ["--stop-reading-after", "0", "--partial-drain-bytes", "4"];
+      }
+      if (cmd === "solver_engine_request") {
+        // Match real Tauri invoke Err (structured IpcError), not plain Error.
+        throw {
+          class: "timeout",
+          phase: "after_write",
+          message: "unknown-after-write: op save deadline elapsed after write started",
+          op: "save",
+          degraded: false,
+        };
+      }
+      if (cmd === "solver_engine_info") return { launchId: "L1" };
+      if (cmd === "kill_solver_engine_cmd") return null;
       if (cmd === "exit_with_code") return null;
       throw new Error(`unexpected invoke ${cmd}`);
     });

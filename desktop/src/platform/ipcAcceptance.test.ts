@@ -115,26 +115,47 @@ describe("runBlockedWriteProbe", () => {
     invoke.mockReset();
   });
 
-  it("skips with Rust-hook TODO when sidecar keeps answering", async () => {
+  it("fails when the Rust blocked-write arm is not active", async () => {
     const { runBlockedWriteProbe } = await import("./ipcAcceptance");
     invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "ipc_blocked_write_armed") return false;
+      if (cmd === "solver_engine_extra_args") return [];
+      throw new Error(`unexpected invoke ${cmd}`);
+    });
+    const result = await runBlockedWriteProbe();
+    expect(result.ok).toBe(false);
+    expect(result.skipped).toBeFalsy();
+    expect(result.stage).toBe("BlockedWrite");
+    expect(result.detail).toMatch(/arm not active/);
+  });
+
+  it("fails when armed but sidecar keeps answering", async () => {
+    const { runBlockedWriteProbe } = await import("./ipcAcceptance");
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "ipc_blocked_write_armed") return true;
+      if (cmd === "solver_engine_extra_args") {
+        return ["--stop-reading-after", "1"];
+      }
       if (cmd === "solver_engine_request") {
         return { ok: true, body: { kind: "decision" } };
       }
       throw new Error(`unexpected invoke ${cmd}`);
     });
     const result = await runBlockedWriteProbe();
-    expect(result.ok).toBe(true);
-    expect(result.skipped).toBe(true);
-    expect(result.stage).toBe("BlockedWrite");
-    expect(result.detail).toMatch(/STUDY_SOLVER_ENGINE_ARGS/);
+    expect(result.ok).toBe(false);
+    expect(result.skipped).toBeFalsy();
+    expect(result.detail).toMatch(/no write\/admission bound/);
   });
 
   it("passes when a write/admission bound is observed", async () => {
     const { runBlockedWriteProbe } = await import("./ipcAcceptance");
     invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "ipc_blocked_write_armed") return true;
+      if (cmd === "solver_engine_extra_args") {
+        return ["--stop-reading-after", "0", "--partial-drain-bytes", "4"];
+      }
       if (cmd === "solver_engine_request") {
-        throw new Error("admission saturated: queued bytes");
+        throw new Error("unknown-after-write: op save deadline elapsed after write started");
       }
       if (cmd === "solver_engine_info") return { launchId: "L1" };
       if (cmd === "kill_solver_engine_cmd") return null;
@@ -144,6 +165,39 @@ describe("runBlockedWriteProbe", () => {
     expect(result.ok).toBe(true);
     expect(result.skipped).toBeFalsy();
     expect(result.detail).toMatch(/bound observed/);
+  });
+
+  it("passes on structured Tauri IpcError timeout after_write (not String([object Object]))", async () => {
+    const { runBlockedWriteProbe, isWriteOrAdmissionBound } = await import("./ipcAcceptance");
+    const structured = {
+      class: "timeout",
+      phase: "after_write",
+      message:
+        "unknown-after-write: op save deadline elapsed after write started (do not auto-replay Save/Open/Solve)",
+      op: "save",
+      request_id: "r-blocked",
+      degraded: false,
+    };
+    expect(isWriteOrAdmissionBound(structured, "save")).toBe(true);
+    // Regression: bare String(err) hid the bound on tip 3cfda36.
+    expect(String(structured)).toBe("[object Object]");
+
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "ipc_blocked_write_armed") return true;
+      if (cmd === "solver_engine_extra_args") {
+        return ["--stop-reading-after", "0", "--partial-drain-bytes", "4"];
+      }
+      if (cmd === "solver_engine_request") {
+        throw structured;
+      }
+      if (cmd === "solver_engine_info") return { launchId: "L1" };
+      if (cmd === "kill_solver_engine_cmd") return null;
+      throw new Error(`unexpected invoke ${cmd}`);
+    });
+    const result = await runBlockedWriteProbe();
+    expect(result.ok).toBe(true);
+    expect(result.skipped).toBeFalsy();
+    expect(result.detail).toMatch(/after_write|unknown-after-write/);
   });
 });
 

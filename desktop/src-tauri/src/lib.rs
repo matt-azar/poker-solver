@@ -208,6 +208,8 @@ pub fn run() {
             solver_engine::solver_engine_ipc_diagnostics,
             solver_engine::kill_solver_engine_cmd,
             solver_engine::ipc_acceptance_enabled,
+            solver_engine::ipc_blocked_write_armed,
+            solver_engine::solver_engine_extra_args,
             solver_engine::installer_e2e_stage,
             solver_engine::installer_e2e_stage_b_enabled,
             solver_engine::installer_e2e_psol_path,

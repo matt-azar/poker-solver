@@ -19,6 +19,10 @@ import { invoke } from "@tauri-apps/api/core";
 // Static import so the packaged Vite bundle always includes window Close/Destroy
 // (a dynamic import can fail in the NSIS WebView and trip exit_with_code(1)).
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import {
+  parseSolverIpcInvokeError,
+  type SolverIpcError,
+} from "../engine/transport";
 import { isTauriRuntime } from "./index";
 
 /** Canonical -Stage / probe names (CI ValidateSet + YAML). */
@@ -234,64 +238,141 @@ export async function runIpcAcceptanceProbe(): Promise<IpcAcceptanceResult> {
 }
 
 /**
+ * Tauri rejects `solver_engine_request` with a structured Rust `IpcError`
+ * object (`{ class, message, phase, … }`), not a plain `Error`. `String(err)`
+ * becomes `[object Object]` and hides timeout/write-bound keywords — that is
+ * why Stage BlockedWrite on tip `3cfda36` armed correctly then burned ~50s on
+ * 2s RPC budgets and exited 1 with "no write/admission bound".
+ */
+export function describeInvokeError(err: unknown, fallbackOp?: string): SolverIpcError {
+  return parseSolverIpcInvokeError(err, fallbackOp);
+}
+
+/** True when the invoke rejection proves a write / admission / pipe bound. */
+export function isWriteOrAdmissionBound(err: unknown, fallbackOp?: string): boolean {
+  const ipc = describeInvokeError(err, fallbackOp);
+  if (
+    ipc.ipcClass === "timeout" ||
+    ipc.ipcClass === "queue_saturation" ||
+    ipc.ipcClass === "connection_loss"
+  ) {
+    return true;
+  }
+  if (ipc.phase === "after_write" || ipc.phase === "before_write") {
+    return true;
+  }
+  const lower = ipc.message.toLowerCase();
+  return (
+    lower.includes("admission saturated") ||
+    lower.includes("queued bytes") ||
+    lower.includes("timed out") ||
+    lower.includes("timeout") ||
+    lower.includes("expired-before-write") ||
+    lower.includes("unknown-after-write") ||
+    lower.includes("after_write") ||
+    lower.includes("connection") ||
+    lower.includes("pipe") ||
+    lower.includes("write:")
+  );
+}
+
+function formatBoundDetail(ipc: SolverIpcError): string {
+  const bits = [ipc.ipcClass, ipc.phase ? `phase=${ipc.phase}` : null, ipc.message].filter(
+    Boolean,
+  );
+  return bits.join(": ");
+}
+
+/**
  * BlockedWrite — prove a genuinely blocked / non-draining write is bounded.
  *
  * Env: STUDY_INSTALLER_E2E=stage-blocked-write
  *
- * Full exercise needs the test sidecar to stop reading after ready
- * (`--stop-reading-after 1`). Packaged Study spawn only forwards `--launch-id`
- * today, so CI must either point STUDY_SOLVER_ENGINE at a wrapper that adds
- * that flag, or land Rust hook `STUDY_SOLVER_ENGINE_ARGS` /
- * `ipc_acceptance_arm_blocked_write` in `solver_engine.rs` `spawn_session`.
- *
- * When the sidecar keeps reading, returns skipped (exit 0) so Stage A/B and
- * DelayedReply stay green until that Rust arm lands.
+ * Requires the Rust spawn arm (`STUDY_SOLVER_ENGINE` → ipc-test-sidecar plus
+ * `STUDY_SOLVER_ENGINE_ARGS=--stop-reading-after 0 --partial-drain-bytes 4`
+ * and/or auto-arm via stage-blocked-write / `STUDY_IPC_BLOCKED_WRITE=1`).
+ * Sidecar counts only non-ready answers so ensure Ready re-probes stay live.
+ * Probe FAILs (never SKIP) when the arm is missing or no write bound.
  */
 export async function runBlockedWriteProbe(): Promise<IpcAcceptanceResult> {
   if (!isTauriRuntime()) {
     return { ok: false, stage: "BlockedWrite", detail: "not a Tauri runtime" };
   }
 
+  let armed = false;
+  let extraArgs: string[] = [];
+  try {
+    armed = Boolean(await invoke("ipc_blocked_write_armed"));
+    extraArgs = (await invoke("solver_engine_extra_args")) as string[];
+  } catch (err: unknown) {
+    const msg = describeInvokeError(err).message;
+    return {
+      ok: false,
+      stage: "BlockedWrite",
+      detail: `ipc_blocked_write_armed invoke failed: ${msg}`,
+    };
+  }
+  if (!armed) {
+    return {
+      ok: false,
+      stage: "BlockedWrite",
+      detail:
+        "BlockedWrite arm not active: set STUDY_SOLVER_ENGINE to ipc-test-sidecar and " +
+        "STUDY_SOLVER_ENGINE_ARGS=--stop-reading-after 0 --partial-drain-bytes 4 " +
+        "(or STUDY_IPC_BLOCKED_WRITE=1 / stage-blocked-write auto-arm). " +
+        "spawn_session must forward stop-reading flags." +
+        (extraArgs.length ? ` extraArgs=${JSON.stringify(extraArgs)}` : ""),
+    };
+  }
+
   let sawBound = false;
   let lastDetail = "";
-  for (let i = 0; i < 24; i += 1) {
-    try {
-      await invoke("solver_engine_request", {
-        op: "node",
-        body: { node_index: i },
-        jobId: null,
-      });
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      lastDetail = msg;
-      const lower = msg.toLowerCase();
-      if (
-        lower.includes("admission saturated") ||
-        lower.includes("queued bytes") ||
-        lower.includes("timed out") ||
-        lower.includes("timeout") ||
-        lower.includes("expired-before-write") ||
-        lower.includes("after_write") ||
-        lower.includes("connection") ||
-        lower.includes("pipe")
-      ) {
-        sawBound = true;
-        break;
+  // ~256 KiB path padding matches Rust mid_frame cargo test — exceeds typical
+  // Windows anonymous-pipe buffer so write_all blocks after the sidecar
+  // partial-drains the 4-byte length prefix (real Writing-phase bound).
+  const bigPath = `/tmp/blocked-write-${"x".repeat(256 * 1024)}.psol`;
+  try {
+    await invoke("solver_engine_request", {
+      op: "save",
+      body: { path: bigPath },
+      jobId: null,
+    });
+  } catch (err: unknown) {
+    const ipc = describeInvokeError(err, "save");
+    lastDetail = formatBoundDetail(ipc);
+    if (isWriteOrAdmissionBound(err, "save")) {
+      sawBound = true;
+    }
+  }
+
+  if (!sawBound) {
+    for (let i = 0; i < 24; i += 1) {
+      try {
+        await invoke("solver_engine_request", {
+          op: "node",
+          body: { node_index: i },
+          jobId: null,
+        });
+      } catch (err: unknown) {
+        const ipc = describeInvokeError(err, "node");
+        lastDetail = formatBoundDetail(ipc);
+        if (isWriteOrAdmissionBound(err, "node")) {
+          sawBound = true;
+          break;
+        }
       }
     }
   }
 
   if (!sawBound) {
-    // TODO(Rust): arm stop-reading in spawn_session — see module doc above.
     return {
-      ok: true,
-      skipped: true,
+      ok: false,
       stage: "BlockedWrite",
       detail:
-        "SKIP: BlockedWrite needs Rust hook STUDY_SOLVER_ENGINE_ARGS=--stop-reading-after 1 " +
-        "(or ipc_acceptance_arm_blocked_write) in solver_engine.rs spawn_session; " +
-        "sidecar kept answering — no write bound observed" +
-        (lastDetail ? `; last=${lastDetail}` : ""),
+        "FAIL: BlockedWrite arm was active but sidecar kept answering — no write/admission bound " +
+        `observed (extraArgs=${JSON.stringify(extraArgs)}` +
+        (lastDetail ? `; last=${lastDetail}` : "") +
+        ")",
     };
   }
 
@@ -536,7 +617,8 @@ async function ensureForAcceptance(): Promise<string | null> {
 
 /**
  * Finish a stage: NormalClosePending success exits via window Close.
- * Skipped stages exit 0 so CI can land the contract before the Rust arm.
+ * BlockedWrite never SKIP — missing arm or unbound write is FAIL (exit 1).
+ * Other stages may still set `skipped` for transitional contracts.
  */
 export async function finishIpcAcceptanceStage(
   result: IpcAcceptanceResult,
@@ -545,6 +627,12 @@ export async function finishIpcAcceptanceStage(
   console.info(`[ipc-acceptance] ${tag} stage=${result.stage}`, result.detail);
 
   if (result.stage === "NormalClosePending" && result.ok && !result.skipped) {
+    return;
+  }
+
+  // BlockedWrite: skipped must not greenwash — treat as failure.
+  if (result.stage === "BlockedWrite" && result.skipped) {
+    await exitWithCode(1);
     return;
   }
 

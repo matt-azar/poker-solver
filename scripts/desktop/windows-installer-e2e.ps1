@@ -29,7 +29,9 @@
 
   Stage BlockedWrite (-Stage BlockedWrite):
     STUDY_INSTALLER_E2E=stage-blocked-write — WebView blocked-write / write-bound
-    probe (skips until Rust STUDY_SOLVER_ENGINE_ARGS / stop-reading arm lands).
+    probe. Builds desktop/ipc-test-sidecar, sets STUDY_SOLVER_ENGINE +
+    STUDY_SOLVER_ENGINE_ARGS=--stop-reading-after 0 --partial-drain-bytes 4 so
+    spawn_session arms a mid-frame stdin stall after ready (non-SKIP PASS).
 
   Stage NormalClosePending (-Stage NormalClosePending):
     STUDY_INSTALLER_E2E=stage-normal-close-pending — normal window Close while
@@ -410,7 +412,36 @@ try {
     if ($env:HOLDEM_STUDY_DIAGNOSTICS_DIR) {
       $psi.Environment["HOLDEM_STUDY_DIAGNOSTICS_DIR"] = $env:HOLDEM_STUDY_DIAGNOSTICS_DIR
     }
-    # Optional: CI may pre-set STUDY_SOLVER_ENGINE (BlockedWrite stop-reading wrapper).
+
+    # BlockedWrite: product-path mid-frame stall via ipc-test-sidecar + Rust
+    # STUDY_SOLVER_ENGINE_ARGS arm in spawn_session (not SKIP).
+    if ($Stage -eq "BlockedWrite") {
+      $sidecarDir = Join-Path $Root "desktop\ipc-test-sidecar"
+      Write-E2E "Stage BlockedWrite: building ipc-test-sidecar at $sidecarDir"
+      Push-Location $sidecarDir
+      try {
+        cargo build --release
+        if ($LASTEXITCODE -ne 0) { throw "cargo build ipc-test-sidecar failed (exit $LASTEXITCODE)" }
+      } finally {
+        Pop-Location
+      }
+      $testSidecar = Join-Path $sidecarDir "target\release\ipc-test-sidecar.exe"
+      if (-not (Test-Path -LiteralPath $testSidecar)) {
+        $testSidecar = Join-Path $sidecarDir "target\debug\ipc-test-sidecar.exe"
+      }
+      if (-not (Test-Path -LiteralPath $testSidecar)) {
+        throw "ipc-test-sidecar.exe missing under desktop/ipc-test-sidecar/target"
+      }
+      $testSidecar = (Resolve-Path -LiteralPath $testSidecar).Path
+      $psi.Environment["STUDY_SOLVER_ENGINE"] = $testSidecar
+      # Mid-frame after ready: ready never counts toward stop-reading. Limit 0
+      # → first post-ready frame (large save) is partial-drained (4-byte
+      # length prefix) then parked so write_all blocks.
+      $psi.Environment["STUDY_SOLVER_ENGINE_ARGS"] = "--stop-reading-after 0 --partial-drain-bytes 4"
+      $psi.Environment["STUDY_IPC_BLOCKED_WRITE"] = "1"
+      Write-E2E "STUDY_SOLVER_ENGINE=$testSidecar"
+      Write-E2E "STUDY_SOLVER_ENGINE_ARGS=$($psi.Environment['STUDY_SOLVER_ENGINE_ARGS'])"
+    }
 
     $studyProc = New-Object System.Diagnostics.Process
     $studyProc.StartInfo = $psi

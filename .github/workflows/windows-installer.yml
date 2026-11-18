@@ -395,8 +395,10 @@ jobs:
       # windows-installer-e2e.ps1 maps -Stage → STUDY_INSTALLER_E2E:
       #
       #   -Stage BlockedWrite
-      #       STUDY_INSTALLER_E2E=stage-blocked-write
-      #       (may SKIP until Rust arms stop-reading via STUDY_SOLVER_ENGINE_ARGS)
+      #       STUDY_INSTALLER_E2E=stage-blocked-write; e2e.ps1 sets
+      #       STUDY_SOLVER_ENGINE → ipc-test-sidecar +
+      #       STUDY_SOLVER_ENGINE_ARGS=--stop-reading-after 0
+      #       --partial-drain-bytes 4 (ready excluded from count; probe never SKIP)
       #
       #   -Stage NormalClosePending
       #       STUDY_INSTALLER_E2E=stage-normal-close-pending
