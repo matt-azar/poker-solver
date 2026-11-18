@@ -170,6 +170,24 @@ export type IpcRequestEnvelope = {
   body?: unknown;
 };
 
+/**
+ * Attach originating launch + expected solution for scoped IPC ops.
+ * Host / Rust reject mismatches before mutation; replies keep authoritative ids.
+ */
+export function withRequestScope(
+  solutionId: string | null | undefined,
+  body?: Record<string, unknown> | null,
+): Record<string, unknown> {
+  const scoped: Record<string, unknown> = body ? { ...body } : {};
+  if (typeof solutionId === "string" && solutionId.trim()) {
+    scoped.solution_id = solutionId.trim();
+  }
+  if (active.kind === "ipc" && active.launchId.trim()) {
+    scoped.launch_id = active.launchId;
+  }
+  return scoped;
+}
+
 /** Typed Rust `IpcError` classes serialized through Tauri invoke Err. */
 export type IpcErrorClass =
   | "queue_saturation"
@@ -405,12 +423,15 @@ export function resetAnalysisIpcSerialForTests(): void {
 }
 
 /** Study node id (`pN.tT.rR`) or legacy numeric node_index (root = 0). */
-export async function ipcValues(nodeIdOrIndex: string | number = 0): Promise<unknown> {
+export async function ipcValues(
+  nodeIdOrIndex: string | number = 0,
+  solutionId?: string | null,
+): Promise<unknown> {
   return runAnalysisWorkerIpc(async () => {
     const body =
       typeof nodeIdOrIndex === "string"
-        ? { node_id: nodeIdOrIndex }
-        : { node_index: nodeIdOrIndex };
+        ? withRequestScope(solutionId, { node_id: nodeIdOrIndex })
+        : withRequestScope(solutionId, { node_index: nodeIdOrIndex });
     const env = await solverEngineRequest("values", body);
     return env.body;
   });
@@ -420,23 +441,30 @@ export async function ipcValues(nodeIdOrIndex: string | number = 0): Promise<unk
 export async function ipcEquity(opts?: {
   nodeIndex?: number;
   nodeId?: string;
+  solutionId?: string | null;
 }): Promise<unknown> {
   return runAnalysisWorkerIpc(async () => {
-    const env = await solverEngineRequest("equity", {
-      node_index: opts?.nodeIndex ?? 0,
-      ...(opts?.nodeId ? { node_id: opts.nodeId } : {}),
-    });
+    const env = await solverEngineRequest(
+      "equity",
+      withRequestScope(opts?.solutionId, {
+        node_index: opts?.nodeIndex ?? 0,
+        ...(opts?.nodeId ? { node_id: opts.nodeId } : {}),
+      }),
+    );
     return env.body;
   });
 }
 
 /** Study node inspect (`pN.tT.rR`) or legacy numeric node_index (root = 0). */
-export async function ipcNode(nodeIdOrIndex: string | number = 0): Promise<unknown> {
+export async function ipcNode(
+  nodeIdOrIndex: string | number = 0,
+  solutionId?: string | null,
+): Promise<unknown> {
   return runAnalysisNodeIpc(async () => {
     const body =
       typeof nodeIdOrIndex === "string"
-        ? { node_id: nodeIdOrIndex }
-        : { node_index: nodeIdOrIndex };
+        ? withRequestScope(solutionId, { node_id: nodeIdOrIndex })
+        : withRequestScope(solutionId, { node_index: nodeIdOrIndex });
     const env = await solverEngineRequest("node", body);
     return env.body;
   });
@@ -473,13 +501,14 @@ export function resetStudyJobIdCounterForTests(): void {
 }
 
 export async function ipcOpen(path: string): Promise<unknown> {
-  const env = await solverEngineRequest("open", { path });
+  const env = await solverEngineRequest("open", withRequestScope(null, { path }));
   return env.body;
 }
 
 export type IpcSaveOptions = {
   /** Average-only PSOL; Continue disabled after open (ZR-96 / ZR-115). */
   studyOnly?: boolean;
+  solutionId?: string | null;
 };
 
 export async function ipcSave(
@@ -490,26 +519,32 @@ export async function ipcSave(
   if (options?.studyOnly === true) {
     body.study_only = true;
   }
-  const env = await solverEngineRequest("save", body);
+  const env = await solverEngineRequest(
+    "save",
+    withRequestScope(options?.solutionId, body),
+  );
   return env.body;
 }
 
 /** Study locks list (`{"locks":[...]}`). */
-export async function ipcListLocks(): Promise<unknown> {
-  const env = await solverEngineRequest("list_locks");
+export async function ipcListLocks(solutionId?: string | null): Promise<unknown> {
+  const env = await solverEngineRequest("list_locks", withRequestScope(solutionId));
   return env.body;
 }
 
 /** Upsert one node/line lock; reply is full locks list. */
-export async function ipcPutLock(body: {
-  node_id: string;
-  kind: "full" | "selected";
-  scope?: "node" | "line";
-  hand_indices?: number[];
-  probs: number[];
-  combo_probs?: number[][];
-}): Promise<unknown> {
-  const env = await solverEngineRequest("put_lock", body);
+export async function ipcPutLock(
+  body: {
+    node_id: string;
+    kind: "full" | "selected";
+    scope?: "node" | "line";
+    hand_indices?: number[];
+    probs: number[];
+    combo_probs?: number[][];
+  },
+  solutionId?: string | null,
+): Promise<unknown> {
+  const env = await solverEngineRequest("put_lock", withRequestScope(solutionId, body));
   return env.body;
 }
 
@@ -519,6 +554,7 @@ export async function ipcDeleteLock(opts?: {
   handIndex?: number;
   /** Default node = board-local; line clears expanded runout locks for the betting line. */
   scope?: "node" | "line";
+  solutionId?: string | null;
 }): Promise<unknown> {
   const body: Record<string, unknown> = {};
   if (opts?.nodeId) body.node_id = opts.nodeId;
@@ -526,25 +562,36 @@ export async function ipcDeleteLock(opts?: {
   if (opts?.scope) body.scope = opts.scope;
   const env = await solverEngineRequest(
     "delete_lock",
-    Object.keys(body).length > 0 ? body : null,
+    withRequestScope(opts?.solutionId, Object.keys(body).length > 0 ? body : null),
   );
   return env.body;
 }
 
 /** Study strategy-edits list (`{"edits":[...],"persisted":false}`). */
-export async function ipcListStrategyEdits(): Promise<unknown> {
-  const env = await solverEngineRequest("list_strategy_edits");
+export async function ipcListStrategyEdits(
+  solutionId?: string | null,
+): Promise<unknown> {
+  const env = await solverEngineRequest(
+    "list_strategy_edits",
+    withRequestScope(solutionId),
+  );
   return env.body;
 }
 
 /** Upsert one free-form strategy edit; reply is full edits list. */
-export async function ipcPutStrategyEdit(body: {
-  node_id: string;
-  kind: "full" | "selected";
-  hand_indices?: number[];
-  probs: number[];
-}): Promise<unknown> {
-  const env = await solverEngineRequest("put_strategy_edit", body);
+export async function ipcPutStrategyEdit(
+  body: {
+    node_id: string;
+    kind: "full" | "selected";
+    hand_indices?: number[];
+    probs: number[];
+  },
+  solutionId?: string | null,
+): Promise<unknown> {
+  const env = await solverEngineRequest(
+    "put_strategy_edit",
+    withRequestScope(solutionId, body),
+  );
   return env.body;
 }
 
@@ -552,13 +599,14 @@ export async function ipcPutStrategyEdit(body: {
 export async function ipcDeleteStrategyEdit(opts?: {
   nodeId?: string;
   handIndex?: number;
+  solutionId?: string | null;
 }): Promise<unknown> {
   const body: Record<string, unknown> = {};
   if (opts?.nodeId) body.node_id = opts.nodeId;
   if (opts?.handIndex !== undefined) body.hand_index = opts.handIndex;
   const env = await solverEngineRequest(
     "delete_strategy_edit",
-    Object.keys(body).length > 0 ? body : null,
+    withRequestScope(opts?.solutionId, Object.keys(body).length > 0 ? body : null),
   );
   return env.body;
 }
@@ -570,14 +618,14 @@ export async function ipcBeginConfig(
   // Pass Study job id so Stop during compile cancel-tracks the same job (ZR-151).
   const env = await solverEngineRequest(
     "begin_config",
-    { config_text: configText },
+    withRequestScope(null, { config_text: configText }),
     jobId ?? null,
   );
   return env.body;
 }
 
-export async function ipcGetConfig(): Promise<unknown> {
-  const env = await solverEngineRequest("get_config");
+export async function ipcGetConfig(solutionId?: string | null): Promise<unknown> {
+  const env = await solverEngineRequest("get_config", withRequestScope(solutionId));
   return env.body;
 }
 
@@ -599,6 +647,7 @@ export type IpcSolveOptions = {
   time_limit?: number;
   eval_every?: number;
   jobId?: string | null;
+  solutionId?: string | null;
 };
 
 export async function ipcSolve(
@@ -621,7 +670,11 @@ export async function ipcSolve(
   if (opts.eval_every != null && Number.isFinite(opts.eval_every) && opts.eval_every > 0) {
     body.eval_every = Math.trunc(opts.eval_every);
   }
-  const env = await solverEngineRequest("solve", body, opts.jobId ?? null);
+  const env = await solverEngineRequest(
+    "solve",
+    withRequestScope(opts.solutionId, body),
+    opts.jobId ?? null,
+  );
   return env.body;
 }
 
@@ -632,6 +685,8 @@ export type IpcResolveLockedOptions = {
   samples?: number;
   time_limit?: number;
   jobId?: string | null;
+  /** Pre-resolve solution identity the caller expects to replace. */
+  solutionId?: string | null;
 };
 
 /** Locked re-solve: host stamps baseline, optional reset, trains under locks. */
@@ -649,7 +704,11 @@ export async function ipcResolveLocked(opts: IpcResolveLockedOptions): Promise<u
   if (opts.time_limit != null && Number.isFinite(opts.time_limit) && opts.time_limit >= 0) {
     body.time_limit = opts.time_limit;
   }
-  const env = await solverEngineRequest("resolve_locked", body, opts.jobId ?? null);
+  const env = await solverEngineRequest(
+    "resolve_locked",
+    withRequestScope(opts.solutionId, body),
+    opts.jobId ?? null,
+  );
   return env.body;
 }
 
@@ -675,12 +734,16 @@ export async function ipcCancelEquityJob(jobId: string): Promise<unknown> {
 export async function ipcCategories(opts?: {
   nodeIndex?: number;
   nodeId?: string;
+  solutionId?: string | null;
 }): Promise<unknown> {
   return runAnalysisWorkerIpc(async () => {
-    const env = await solverEngineRequest("categories", {
-      node_index: opts?.nodeIndex ?? 0,
-      ...(opts?.nodeId ? { node_id: opts.nodeId } : {}),
-    });
+    const env = await solverEngineRequest(
+      "categories",
+      withRequestScope(opts?.solutionId, {
+        node_index: opts?.nodeIndex ?? 0,
+        ...(opts?.nodeId ? { node_id: opts.nodeId } : {}),
+      }),
+    );
     return env.body;
   });
 }
@@ -694,11 +757,14 @@ export async function ipcCompare(opts: {
   scenario: string;
   nodeId: string;
 }): Promise<unknown> {
-  const env = await solverEngineRequest("compare", {
-    baseline: opts.baseline,
-    scenario: opts.scenario,
-    node_id: opts.nodeId,
-  });
+  const env = await solverEngineRequest(
+    "compare",
+    withRequestScope(null, {
+      baseline: opts.baseline,
+      scenario: opts.scenario,
+      node_id: opts.nodeId,
+    }),
+  );
   return env.body;
 }
 
@@ -706,12 +772,16 @@ export async function ipcCompare(opts: {
 export async function ipcLineCardReport(opts: {
   nodeId: string;
   varyStreet?: "turn" | "river";
+  solutionId?: string | null;
 }): Promise<unknown> {
   return runAnalysisWorkerIpc(async () => {
-    const env = await solverEngineRequest("line_card_report", {
-      node_id: opts.nodeId,
-      ...(opts.varyStreet ? { vary_street: opts.varyStreet } : {}),
-    });
+    const env = await solverEngineRequest(
+      "line_card_report",
+      withRequestScope(opts.solutionId, {
+        node_id: opts.nodeId,
+        ...(opts.varyStreet ? { vary_street: opts.varyStreet } : {}),
+      }),
+    );
     return env.body;
   });
 }
@@ -720,12 +790,16 @@ export async function ipcLineCardReport(opts: {
 export async function ipcValueBluffsPostCall(opts: {
   nodeId: string;
   minBetFreq?: number;
+  solutionId?: string | null;
 }): Promise<unknown> {
   return runAnalysisWorkerIpc(async () => {
-    const env = await solverEngineRequest("value_bluffs_post_call", {
-      node_id: opts.nodeId,
-      ...(opts.minBetFreq != null ? { min_bet_freq: opts.minBetFreq } : {}),
-    });
+    const env = await solverEngineRequest(
+      "value_bluffs_post_call",
+      withRequestScope(opts.solutionId, {
+        node_id: opts.nodeId,
+        ...(opts.minBetFreq != null ? { min_bet_freq: opts.minBetFreq } : {}),
+      }),
+    );
     return env.body;
   });
 }

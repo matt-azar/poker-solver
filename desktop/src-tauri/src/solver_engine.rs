@@ -731,6 +731,21 @@ fn allocate_request_id(io: &SessionIo) -> String {
     format!("r{n}")
 }
 
+/// When a request body carries `launch_id`, require it match the live child.
+/// Returns `Some(expected)` when present and mismatched; `None` when absent or matching.
+fn stale_launch_id<'a>(body: &'a Value, live_launch_id: &str) -> Option<&'a str> {
+    let expected = body
+        .get("launch_id")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?;
+    if expected == live_launch_id {
+        None
+    } else {
+        Some(expected)
+    }
+}
+
 
 /// Decrements the admission outstanding counter on drop (all exit paths).
 struct OutstandingGuard {
@@ -770,6 +785,16 @@ async fn rpc_shared(
             "solver-engine session shut down",
             &io.launch_id,
             io.child_exit.lock().ok().and_then(|g| g.clone()),
+        ));
+    }
+
+    // Reject requests aimed at an earlier launch before enqueue/write.
+    if let Some(_expected) = stale_launch_id(&body, &io.launch_id) {
+        return Err(IpcError::engine_rejection(
+            "stale_launch",
+            "request targeted an earlier solver-engine launch",
+            op,
+            "",
         ));
     }
 
@@ -1422,6 +1447,19 @@ mod tests {
         let decoded: Value = serde_json::from_slice(&frame[4..]).expect("decode");
         assert_eq!(decoded["op"], "ready");
         assert_eq!(decoded["request_id"], "r1");
+    }
+
+    #[test]
+    fn stale_launch_id_detects_earlier_launch_even_when_both_mint_s1() {
+        // Two launches can each allocate solution `s1`. Launch identity is what
+        // keeps a request for the retired child from mutating the live one.
+        let body_a = json!({ "solution_id": "s1", "launch_id": "launch-a" });
+        let body_b = json!({ "solution_id": "s1", "launch_id": "launch-b" });
+        let body_none = json!({ "solution_id": "s1" });
+        assert_eq!(stale_launch_id(&body_a, "launch-b"), Some("launch-a"));
+        assert_eq!(stale_launch_id(&body_b, "launch-b"), None);
+        assert_eq!(stale_launch_id(&body_none, "launch-b"), None);
+        assert_eq!(stale_launch_id(&Value::Null, "launch-b"), None);
     }
 
     #[test]

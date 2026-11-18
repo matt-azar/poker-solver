@@ -157,6 +157,20 @@ impl IpcError {
         }
     }
 
+    pub fn engine_rejection(
+        error_code: impl Into<String>,
+        error_message: impl Into<String>,
+        op: impl Into<String>,
+        request_id: impl Into<String>,
+    ) -> Self {
+        Self::EngineRejection {
+            error_code: error_code.into(),
+            error_message: error_message.into(),
+            op: op.into(),
+            request_id: request_id.into(),
+        }
+    }
+
     /// True when Study must re-ensure (pipe/EOF/session death), not soft timeout.
     pub fn is_connection_loss(&self) -> bool {
         matches!(self, Self::ConnectionLoss { .. })

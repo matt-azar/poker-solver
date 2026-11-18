@@ -95,7 +95,7 @@ describe("ipcValues node targeting", () => {
     expect(body.node_id).toBe("p2.t-1.r-1");
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "values",
-      body: { node_id: "p2.t-1.r-1" },
+      body: { node_id: "p2.t-1.r-1", launch_id: "t" },
       jobId: null,
     });
   });
@@ -112,7 +112,7 @@ describe("ipcValues node targeting", () => {
     await ipcValues(0);
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "values",
-      body: { node_index: 0 },
+      body: { node_index: 0, launch_id: "t" },
       jobId: null,
     });
   });
@@ -241,7 +241,7 @@ describe("Slice A IPC lifecycle + node helpers", () => {
     expect(body.strategy?.[0]).toEqual([0.4, 0.6]);
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "node",
-      body: { node_id: "p0.t-1.r-1" },
+      body: { node_id: "p0.t-1.r-1", launch_id: "t" },
       jobId: null,
     });
   });
@@ -294,7 +294,7 @@ describe("Slice A IPC lifecycle + node helpers", () => {
     await ipcOpen("/tmp/x.psol");
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "open",
-      body: { path: "/tmp/x.psol" },
+      body: { path: "/tmp/x.psol", launch_id: "t" },
       jobId: null,
     });
 
@@ -309,15 +309,20 @@ describe("Slice A IPC lifecycle + node helpers", () => {
     await ipcSave("/tmp/x.psol");
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "save",
-      body: { path: "/tmp/x.psol" },
+      body: { path: "/tmp/x.psol", launch_id: "t" },
       jobId: null,
     });
 
     invoke.mockClear();
-    await ipcSave("/tmp/study.psol", { studyOnly: true });
+    await ipcSave("/tmp/study.psol", { studyOnly: true, solutionId: "s2" });
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "save",
-      body: { path: "/tmp/study.psol", study_only: true },
+      body: {
+        path: "/tmp/study.psol",
+        study_only: true,
+        solution_id: "s2",
+        launch_id: "t",
+      },
       jobId: null,
     });
   });
@@ -380,7 +385,7 @@ describe("Slice C locks IPC helpers", () => {
     await ipcListLocks();
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "list_locks",
-      body: null,
+      body: { launch_id: "t" },
       jobId: null,
     });
 
@@ -407,6 +412,7 @@ describe("Slice C locks IPC helpers", () => {
         scope: "line",
         hand_indices: [0, 1],
         probs: [1, 0],
+        launch_id: "t",
       },
       jobId: null,
     });
@@ -422,7 +428,7 @@ describe("Slice C locks IPC helpers", () => {
     await ipcDeleteLock({ nodeId: "p0.t-1.r-1", handIndex: 1 });
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "delete_lock",
-      body: { node_id: "p0.t-1.r-1", hand_index: 1 },
+      body: { node_id: "p0.t-1.r-1", hand_index: 1, launch_id: "t" },
       jobId: null,
     });
   });
@@ -441,10 +447,17 @@ describe("Slice C locks IPC helpers", () => {
       warm_start: 1,
       time_limit: 9,
       jobId: "j-rl",
+      solutionId: "s2",
     });
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "resolve_locked",
-      body: { iterations: 4, warm_start: 1, time_limit: 9 },
+      body: {
+        iterations: 4,
+        warm_start: 1,
+        time_limit: 9,
+        solution_id: "s2",
+        launch_id: "t",
+      },
       jobId: "j-rl",
     });
   });
@@ -584,7 +597,7 @@ describe("ZR-101 strategy-edits IPC helpers", () => {
     await ipcListStrategyEdits();
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "list_strategy_edits",
-      body: null,
+      body: { launch_id: "t" },
       jobId: null,
     });
 
@@ -609,6 +622,7 @@ describe("ZR-101 strategy-edits IPC helpers", () => {
         kind: "selected",
         hand_indices: [0, 1],
         probs: [1, 0],
+        launch_id: "t",
       },
       jobId: null,
     });
@@ -624,7 +638,7 @@ describe("ZR-101 strategy-edits IPC helpers", () => {
     await ipcDeleteStrategyEdit({ nodeId: "p0.t-1.r-1", handIndex: 1 });
     expect(invoke).toHaveBeenCalledWith("solver_engine_request", {
       op: "delete_strategy_edit",
-      body: { node_id: "p0.t-1.r-1", hand_index: 1 },
+      body: { node_id: "p0.t-1.r-1", hand_index: 1, launch_id: "t" },
       jobId: null,
     });
   });

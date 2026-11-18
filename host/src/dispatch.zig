@@ -56,6 +56,8 @@ const IoTask = struct {
     kind: IoKind,
     /// Save only: average-only Study export (omit regret/strategy_sum).
     study_only: bool = false,
+    /// Save only: when set, refuse before writing if Session no longer matches.
+    expected_solution_id: ?u64 = null,
 };
 
 const PreviewKind = enum { tree_preview, plan_memory };
@@ -545,9 +547,25 @@ fn persistLocksText(state: *HostState, locks: *const node_lock.LockSet) !void {
 }
 
 fn replyLocksBody(state: *HostState, req: ipc.Envelope, locks: *const node_lock.LockSet) !ipc.Envelope {
-    const body = locks_json.packStudyLocksBody(state.allocator, locks) catch |err| {
+    const locks_only = locks_json.packStudyLocksBody(state.allocator, locks) catch |err| {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "locks_pack_failed", @errorName(err));
     };
+    defer state.allocator.free(locks_only);
+    // Inject authoritative solution identity ahead of the locks array.
+    var list = std.ArrayList(u8).init(state.allocator);
+    errdefer list.deinit();
+    const w = list.writer();
+    try w.print("{{\"solution_id\":\"s{d}\",\"policy_revision\":{d},", .{
+        state.session.solution_id,
+        state.session.policyRevision(),
+    });
+    if (locks_only.len > 0 and locks_only[0] == '{') {
+        try list.appendSlice(locks_only[1..]);
+    } else {
+        try list.appendSlice(locks_only);
+        try list.append('}');
+    }
+    const body = try list.toOwnedSlice();
     defer state.allocator.free(body);
     return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
 }
@@ -559,9 +577,24 @@ fn persistStrategyEditsText(state: *HostState, edits: *const strategy_edit.Strat
 }
 
 fn replyStrategyEditsBody(state: *HostState, req: ipc.Envelope, edits: *const strategy_edit.StrategyEditSet) !ipc.Envelope {
-    const body = strategy_edits_json.packStudyStrategyEditsBody(state.allocator, edits) catch |err| {
+    const edits_only = strategy_edits_json.packStudyStrategyEditsBody(state.allocator, edits) catch |err| {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "strategy_edits_pack_failed", @errorName(err));
     };
+    defer state.allocator.free(edits_only);
+    var list = std.ArrayList(u8).init(state.allocator);
+    errdefer list.deinit();
+    const w = list.writer();
+    try w.print("{{\"solution_id\":\"s{d}\",\"policy_revision\":{d},", .{
+        state.session.solution_id,
+        state.session.policyRevision(),
+    });
+    if (edits_only.len > 0 and edits_only[0] == '{') {
+        try list.appendSlice(edits_only[1..]);
+    } else {
+        try list.appendSlice(edits_only);
+        try list.append('}');
+    }
+    const body = try list.toOwnedSlice();
     defer state.allocator.free(body);
     return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
 }
@@ -752,6 +785,7 @@ fn handlePutLock(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
     };
     defer lease.deinit();
+    if (try rejectStaleSolution(state, req, lease.solution_id)) |err_reply| return err_reply;
 
     const node_id_text = bodyStringField(req.body_json, "node_id") orelse
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "node_id required");
@@ -959,6 +993,7 @@ fn handleDeleteLock(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     if (state.session.solution_id == 0) {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no solution");
     }
+    if (try rejectStaleSolution(state, req, state.session.solution_id)) |err_reply| return err_reply;
     var locks = locks_json.parseSessionLocks(state.allocator, state.session.locks_text) catch |err| {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_locks", @errorName(err));
     };
@@ -1082,6 +1117,7 @@ fn handlePutStrategyEdit(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
     };
     defer lease.deinit();
+    if (try rejectStaleSolution(state, req, lease.solution_id)) |err_reply| return err_reply;
 
     const node_id_text = bodyStringField(req.body_json, "node_id") orelse
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "node_id required");
@@ -1201,6 +1237,7 @@ fn handleDeleteStrategyEdit(state: *HostState, req: ipc.Envelope) !ipc.Envelope 
     if (state.session.solution_id == 0) {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no solution");
     }
+    if (try rejectStaleSolution(state, req, state.session.solution_id)) |err_reply| return err_reply;
     var edits = strategy_edits_json.parseSessionStrategyEdits(state.allocator, state.session.strategy_edits_text) catch |err| {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_strategy_edits", @errorName(err));
     };
@@ -1258,6 +1295,7 @@ fn handleEquity(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
     };
     defer lease.deinit();
+    if (try rejectStaleSolution(state, req, lease.solution_id)) |err_reply| return err_reply;
     // Reach-weighted node check-down (audit P0-2 / ZR-95): board through the
     // selected node + both players' strategy-conditioned reach.
     const located = resolveLocatedNode(lease.game, req.body_json) catch |err| {
@@ -1355,6 +1393,7 @@ fn handleCategories(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
     };
     defer lease.deinit();
+    if (try rejectStaleSolution(state, req, lease.solution_id)) |err_reply| return err_reply;
     const located = resolveLocatedNode(lease.game, req.body_json) catch |err| {
         return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_node", @errorName(err));
     };
@@ -1405,6 +1444,73 @@ fn parseSolutionIdToken(text: []const u8) ?u64 {
     const digits = if (text.len >= 2 and (text[0] == 's' or text[0] == 'S')) text[1..] else text;
     if (digits.len == 0) return null;
     return std.fmt.parseInt(u64, digits, 10) catch null;
+}
+
+/// Optional expected solution from a request body (`"s12"`, `"12"`, or bare number).
+fn parseBodySolutionId(body: []const u8) ?u64 {
+    if (bodyStringField(body, "solution_id")) |token| {
+        return parseSolutionIdToken(token);
+    }
+    if (bodyIntField(body, "solution_id")) |n| {
+        if (n < 0) return null;
+        return @intCast(n);
+    }
+    return null;
+}
+
+/// When the body carries `launch_id`, require it matches this process launch.
+fn rejectStaleLaunch(state: *HostState, req: ipc.Envelope) !?ipc.Envelope {
+    const expected = bodyStringField(req.body_json, "launch_id") orelse return null;
+    if (expected.len == 0) return null;
+    if (std.mem.eql(u8, expected, state.launch_id)) return null;
+    return try ipc.makeErrorReply(
+        state.allocator,
+        req.request_id,
+        req.job_id,
+        req.op,
+        "stale_launch",
+        "request targeted an earlier solver-engine launch",
+    );
+}
+
+/// When the body carries `solution_id`, require it matches `actual`.
+fn rejectStaleSolution(state: *HostState, req: ipc.Envelope, actual: u64) !?ipc.Envelope {
+    return rejectStaleSolutionFields(
+        state.allocator,
+        req.request_id,
+        req.job_id,
+        req.op,
+        req.body_json,
+        actual,
+    );
+}
+
+fn rejectStaleSolutionFields(
+    allocator: std.mem.Allocator,
+    request_id: []const u8,
+    job_id: ?[]const u8,
+    op: []const u8,
+    body_json: []const u8,
+    actual: u64,
+) !?ipc.Envelope {
+    const expected = parseBodySolutionId(body_json) orelse return null;
+    if (expected == actual) return null;
+    return try ipc.makeErrorReply(
+        allocator,
+        request_id,
+        job_id,
+        op,
+        "expired_solution",
+        "expected solution is no longer current",
+    );
+}
+
+fn formatSavedBody(buf: []u8, solution_id: u64, policy_revision: u64) ![]u8 {
+    return std.fmt.bufPrint(
+        buf,
+        "{{\"saved\":true,\"solution_id\":\"s{d}\",\"policy_revision\":{d}}}",
+        .{ solution_id, policy_revision },
+    );
 }
 
 /// Dual-session Compare: inspect retained baseline vs current scenario at one node.
@@ -1751,6 +1857,9 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     try state.track(req.request_id);
     defer state.untrack(req.request_id);
 
+    // Launch-scoped requests: reject a body aimed at an earlier child before work.
+    if (try rejectStaleLaunch(state, req)) |err_reply| return err_reply;
+
     // Job-control ops (cancel/pause) must stay reachable for idempotent Stop/Pause
     // of the live id; other ops still reject a sticky cancelled job_id.
     if (state.isCancelled(req.job_id) and
@@ -1784,11 +1893,15 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         if (state.session.solution_id == 0 or state.session.config_text.len == 0) {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no solution config");
         }
-        // Escape config text as a JSON string value.
+        if (try rejectStaleSolution(state, req, state.session.solution_id)) |err_reply| return err_reply;
+        // Escape config text as a JSON string value; echo served identity.
         var list = std.ArrayList(u8).init(state.allocator);
         errdefer list.deinit();
         const w = list.writer();
-        try w.writeAll("{\"street_config_text\":");
+        try w.print("{{\"solution_id\":\"s{d}\",\"policy_revision\":{d},\"street_config_text\":", .{
+            state.session.solution_id,
+            state.session.policyRevision(),
+        });
         try std.json.stringify(state.session.config_text, .{}, w);
         try w.writeAll("}");
         const body = try list.toOwnedSlice();
@@ -1903,6 +2016,7 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
     }
 
     if (std.mem.eql(u8, req.op, "save")) {
+        if (try rejectStaleSolution(state, req, state.session.solution_id)) |err_reply| return err_reply;
         const path = (try bodyUnescapedStringField(state.allocator, req.body_json, "path")) orelse
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "path required");
         defer state.allocator.free(path);
@@ -1911,7 +2025,9 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             const mapped = mapSaveError(err);
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, mapped.code, mapped.message);
         };
-        return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, "{\"saved\":true}");
+        var saved_buf: [128]u8 = undefined;
+        const saved_body = try formatSavedBody(&saved_buf, state.session.solution_id, state.session.policyRevision());
+        return ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, saved_body);
     }
 
     if (std.mem.eql(u8, req.op, "open")) {
@@ -1940,6 +2056,7 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
         };
         defer lease.deinit();
+        if (try rejectStaleSolution(state, req, lease.solution_id)) |err_reply| return err_reply;
         const located = resolveLocatedNode(lease.game, req.body_json) catch |err| {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "unknown_node", @errorName(err));
         };
@@ -1972,6 +2089,7 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
         };
         defer lease.deinit();
+        if (try rejectStaleSolution(state, req, lease.solution_id)) |err_reply| return err_reply;
         return buildValuesReply(state, req.request_id, req.job_id, req.body_json, &lease, threads) catch |err| {
             const code: []const u8 = switch (err) {
                 error.UnknownNode => "unknown_node",
@@ -2012,6 +2130,7 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
         };
         defer lease.deinit();
+        if (try rejectStaleSolution(state, req, lease.solution_id)) |err_reply| return err_reply;
         return buildLineCardReportReply(state, req.request_id, req.job_id, req.body_json, &lease) catch |err| {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "line_card_report_failed", @errorName(err));
         };
@@ -2024,6 +2143,7 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", @errorName(err));
         };
         defer lease.deinit();
+        if (try rejectStaleSolution(state, req, lease.solution_id)) |err_reply| return err_reply;
         return buildValueBluffsPostCallReply(state, req.request_id, req.job_id, req.body_json, &lease) catch |err| {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "value_bluffs_post_call_failed", @errorName(err));
         };
@@ -2035,6 +2155,7 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         if (state.session.solution_id == 0) {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no solution");
         }
+        if (try rejectStaleSolution(state, req, state.session.solution_id)) |err_reply| return err_reply;
         var locks = locks_json.parseSessionLocks(state.allocator, state.session.locks_text) catch |err| {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_locks", @errorName(err));
         };
@@ -2055,6 +2176,7 @@ pub fn handle(state: *HostState, req: ipc.Envelope) !ipc.Envelope {
         if (state.session.solution_id == 0) {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "nothing_published", "no solution");
         }
+        if (try rejectStaleSolution(state, req, state.session.solution_id)) |err_reply| return err_reply;
         var edits = strategy_edits_json.parseSessionStrategyEdits(state.allocator, state.session.strategy_edits_text) catch |err| {
             return ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_strategy_edits", @errorName(err));
         };
@@ -2143,7 +2265,14 @@ fn trainWorker(task: *TrainTask) void {
 }
 
 /// ZR-106 short-admit JSON (Study polls `status` for completion).
-fn formatTrainAdmitBody(buf: []u8, solution_id: u64, threads: u32) ![]u8 {
+fn formatTrainAdmitBody(buf: []u8, solution_id: u64, threads: u32, baseline_id: u64) ![]u8 {
+    if (baseline_id != 0) {
+        return std.fmt.bufPrint(
+            buf,
+            "{{\"accepted\":true,\"running\":true,\"solution_id\":{d},\"baseline_solution_id\":{d},\"async\":true,\"threads\":{d}}}",
+            .{ solution_id, baseline_id, threads },
+        );
+    }
     return std.fmt.bufPrint(
         buf,
         "{{\"accepted\":true,\"running\":true,\"solution_id\":{d},\"async\":true,\"threads\":{d}}}",
@@ -2152,8 +2281,13 @@ fn formatTrainAdmitBody(buf: []u8, solution_id: u64, threads: u32) ![]u8 {
 }
 
 fn writeTrainAdmitReply(state: *HostState, req: ipc.Envelope) !void {
-    var buf: [192]u8 = undefined;
-    const body = try formatTrainAdmitBody(&buf, state.session.solution_id, state.session.threads);
+    var buf: [256]u8 = undefined;
+    const body = try formatTrainAdmitBody(
+        &buf,
+        state.session.solution_id,
+        state.session.threads,
+        state.session.baseline_id,
+    );
     var reply = try ipc.makeReply(state.allocator, req.request_id, req.job_id, req.op, body);
     defer reply.deinit();
     try state.writeReply(reply);
@@ -2429,6 +2563,21 @@ pub fn startSolve(state: *HostState, req: ipc.Envelope) !void {
     try state.track(req.request_id);
     errdefer state.untrack(req.request_id);
 
+    if (try rejectStaleLaunch(state, req)) |err_reply| {
+        var owned = err_reply;
+        defer owned.deinit();
+        state.untrack(req.request_id);
+        try state.writeReply(owned);
+        return;
+    }
+    if (try rejectStaleSolution(state, req, state.session.solution_id)) |err_reply| {
+        var owned = err_reply;
+        defer owned.deinit();
+        state.untrack(req.request_id);
+        try state.writeReply(owned);
+        return;
+    }
+
     switch (try admitTrainJob(state, req)) {
         .replied => {
             state.untrack(req.request_id);
@@ -2446,6 +2595,22 @@ pub fn startSolve(state: *HostState, req: ipc.Envelope) !void {
 pub fn startResolveLocked(state: *HostState, req: ipc.Envelope) !void {
     try state.track(req.request_id);
     errdefer state.untrack(req.request_id);
+
+    if (try rejectStaleLaunch(state, req)) |err_reply| {
+        var owned = err_reply;
+        defer owned.deinit();
+        state.untrack(req.request_id);
+        try state.writeReply(owned);
+        return;
+    }
+    // Verify the caller's old identity before minting the scenario id.
+    if (try rejectStaleSolution(state, req, state.session.solution_id)) |err_reply| {
+        var owned = err_reply;
+        defer owned.deinit();
+        state.untrack(req.request_id);
+        try state.writeReply(owned);
+        return;
+    }
 
     switch (try admitTrainJob(state, req)) {
         .replied => {
@@ -2554,6 +2719,21 @@ fn analysisWorker(task: *AnalysisTask) void {
     if (!state.analysisGenCurrent(task.gen)) {
         lease.deinit();
         analysisSupersededReply(state, task);
+        return;
+    }
+
+    if (rejectStaleSolutionFields(
+        state.allocator,
+        task.request_id,
+        task.job_id,
+        task.op,
+        task.body_json,
+        lease.solution_id,
+    ) catch null) |err_reply| {
+        var owned = err_reply;
+        defer owned.deinit();
+        lease.deinit();
+        state.writeReply(owned) catch {};
         return;
     }
 
@@ -2832,6 +3012,14 @@ fn startAnalysis(state: *HostState, req: ipc.Envelope, kind: AnalysisKind) !void
     try state.track(req.request_id);
     errdefer state.untrack(req.request_id);
 
+    if (try rejectStaleLaunch(state, req)) |err_reply| {
+        var owned = err_reply;
+        defer owned.deinit();
+        state.untrack(req.request_id);
+        try state.writeReply(owned);
+        return;
+    }
+
     // Coalesce: bump gen so any in-flight older analysis replies superseded.
     const gen = state.bumpAnalysisGen();
 
@@ -2965,6 +3153,21 @@ fn ioWorker(task: *IoTask) void {
 
     switch (task.kind) {
         .save => {
+            if (task.expected_solution_id) |expected| {
+                if (expected != state.session.solution_id) {
+                    var err_reply = ipc.makeErrorReply(
+                        state.allocator,
+                        task.request_id,
+                        task.job_id,
+                        task.op,
+                        "expired_solution",
+                        "expected solution is no longer current",
+                    ) catch return;
+                    defer err_reply.deinit();
+                    state.writeReply(err_reply) catch {};
+                    return;
+                }
+            }
             state.session.saveWithOptions(task.path, .{ .study_only = task.study_only }) catch |err| {
                 const mapped = mapSaveError(err);
                 var err_reply = ipc.makeErrorReply(state.allocator, task.request_id, task.job_id, task.op, mapped.code, mapped.message) catch return;
@@ -2972,7 +3175,13 @@ fn ioWorker(task: *IoTask) void {
                 state.writeReply(err_reply) catch {};
                 return;
             };
-            var reply = ipc.makeReply(state.allocator, task.request_id, task.job_id, task.op, "{\"saved\":true}") catch return;
+            var saved_buf: [128]u8 = undefined;
+            const saved_body = formatSavedBody(
+                &saved_buf,
+                state.session.solution_id,
+                state.session.policyRevision(),
+            ) catch return;
+            var reply = ipc.makeReply(state.allocator, task.request_id, task.job_id, task.op, saved_body) catch return;
             defer reply.deinit();
             state.writeReply(reply) catch {};
         },
@@ -2995,7 +3204,14 @@ fn ioWorker(task: *IoTask) void {
     }
 }
 
-fn startIo(state: *HostState, req: ipc.Envelope, kind: IoKind, path: []u8, study_only: bool) !void {
+fn startIo(
+    state: *HostState,
+    req: ipc.Envelope,
+    kind: IoKind,
+    path: []u8,
+    study_only: bool,
+    expected_solution_id: ?u64,
+) !void {
     // Caller transferred path ownership. Free on every early-exit before worker owns it.
     var path_owned = true;
     errdefer if (path_owned) state.allocator.free(path);
@@ -3030,6 +3246,7 @@ fn startIo(state: *HostState, req: ipc.Envelope, kind: IoKind, path: []u8, study
         .path = path,
         .kind = kind,
         .study_only = study_only,
+        .expected_solution_id = expected_solution_id,
     };
     path_owned = false;
 
@@ -3092,6 +3309,19 @@ fn mapOpenError(err: anyerror) struct { code: []const u8, message: []const u8 } 
 }
 
 pub fn startSave(state: *HostState, req: ipc.Envelope) !void {
+    if (try rejectStaleLaunch(state, req)) |err_reply| {
+        var owned = err_reply;
+        defer owned.deinit();
+        try state.writeReply(owned);
+        return;
+    }
+    // Refuse before path open / file create when the caller targets a replaced solution.
+    if (try rejectStaleSolution(state, req, state.session.solution_id)) |err_reply| {
+        var owned = err_reply;
+        defer owned.deinit();
+        try state.writeReply(owned);
+        return;
+    }
     const path = (try bodyUnescapedStringField(state.allocator, req.body_json, "path")) orelse {
         var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "invalid_request", "path required");
         defer err_reply.deinit();
@@ -3099,10 +3329,16 @@ pub fn startSave(state: *HostState, req: ipc.Envelope) !void {
         return;
     };
     const study_only = bodyBoolField(req.body_json, "study_only") orelse false;
-    try startIo(state, req, .save, path, study_only);
+    try startIo(state, req, .save, path, study_only, parseBodySolutionId(req.body_json));
 }
 
 pub fn startOpen(state: *HostState, req: ipc.Envelope) !void {
+    if (try rejectStaleLaunch(state, req)) |err_reply| {
+        var owned = err_reply;
+        defer owned.deinit();
+        try state.writeReply(owned);
+        return;
+    }
     if (state.beginOrTrainBusy()) {
         var err_reply = try ipc.makeErrorReply(state.allocator, req.request_id, req.job_id, req.op, "busy", "begin or train already running");
         defer err_reply.deinit();
@@ -3115,7 +3351,7 @@ pub fn startOpen(state: *HostState, req: ipc.Envelope) !void {
         try state.writeReply(err_reply);
         return;
     };
-    try startIo(state, req, .open, path, false);
+    try startIo(state, req, .open, path, false, null);
 }
 
 fn previewWorker(task: *PreviewTask) void {
@@ -5201,7 +5437,7 @@ test "short-admit body shape and continue iterations_requested target" {
     try state.session.train(3);
 
     var buf: [192]u8 = undefined;
-    const admit_body = try formatTrainAdmitBody(&buf, state.session.solution_id, state.session.threads);
+    const admit_body = try formatTrainAdmitBody(&buf, state.session.solution_id, state.session.threads, 0);
     try std.testing.expect(std.mem.indexOf(u8, admit_body, "\"accepted\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, admit_body, "\"running\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, admit_body, "\"async\":true") != null);
@@ -6255,4 +6491,237 @@ test "wide flop equity and value_bluffs_post_call return numbers" {
     try std.testing.expect(std.mem.indexOf(u8, vb_reply.body_json, "\"kind\":\"value_bluffs_post_call\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, vb_reply.body_json, "\"hands\":[") != null);
     try std.testing.expect(std.mem.indexOf(u8, vb_reply.body_json, "\"equity\":") != null);
+}
+
+test "stale solution_id rejects node and save before mutating (same root name)" {
+    // Two solutions share root node_id `p0.t-1.r-1` but differ in board/pot.
+    // A stale caller that still names solution A must not read or checkpoint B.
+    const config_a =
+        \\street-config 1
+        \\board Ah Kh Qh Jh 2c
+        \\pot 100
+        \\stack 100
+        \\oop-range AsQs:1
+        \\ip-range KdKs:1
+        \\oop-river-bets 
+        \\ip-river-bets 
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    const config_b =
+        \\street-config 1
+        \\board Ac Kh Qh Jh 2c
+        \\pot 160
+        \\stack 100
+        \\oop-range AsQs:1
+        \\ip-range KdKs:1
+        \\oop-river-bets 
+        \\ip-river-bets 
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "identity-stale");
+    defer state.deinit();
+    try state.session.begin(config_a);
+    try state.session.train(1);
+    const id_a = state.session.solution_id;
+    try std.testing.expect(id_a > 0);
+
+    try state.session.begin(config_b);
+    try state.session.train(1);
+    const id_b = state.session.solution_id;
+    try std.testing.expect(id_b != id_a);
+
+    var id_a_buf: [32]u8 = undefined;
+    const id_a_token = try std.fmt.bufPrint(&id_a_buf, "s{d}", .{id_a});
+    var id_b_buf: [32]u8 = undefined;
+    const id_b_token = try std.fmt.bufPrint(&id_b_buf, "s{d}", .{id_b});
+
+    // Stale node read for A while B is current.
+    var stale_node_body_buf: [96]u8 = undefined;
+    const stale_node_body = try std.fmt.bufPrint(
+        &stale_node_body_buf,
+        "{{\"node_id\":\"p0.t-1.r-1\",\"solution_id\":\"{s}\"}}",
+        .{id_a_token},
+    );
+    var stale_node: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "node-stale"),
+        .op = try std.testing.allocator.dupe(u8, "node"),
+        .body_json = try std.testing.allocator.dupe(u8, stale_node_body),
+    };
+    defer stale_node.deinit();
+    var stale_node_reply = try handle(&state, stale_node);
+    defer stale_node_reply.deinit();
+    try std.testing.expect(!stale_node_reply.ok);
+    try std.testing.expectEqualStrings("expired_solution", stale_node_reply.error_code orelse "");
+    try std.testing.expectEqual(id_b, state.session.solution_id);
+
+    // Current identity still serves B (same node name, B's pot).
+    var live_node_body_buf: [96]u8 = undefined;
+    const live_node_body = try std.fmt.bufPrint(
+        &live_node_body_buf,
+        "{{\"node_id\":\"p0.t-1.r-1\",\"solution_id\":\"{s}\"}}",
+        .{id_b_token},
+    );
+    var live_node: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "node-live"),
+        .op = try std.testing.allocator.dupe(u8, "node"),
+        .body_json = try std.testing.allocator.dupe(u8, live_node_body),
+    };
+    defer live_node.deinit();
+    var live_node_reply = try handle(&state, live_node);
+    defer live_node_reply.deinit();
+    try std.testing.expect(live_node_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, live_node_reply.body_json, id_b_token) != null);
+    try std.testing.expect(std.mem.indexOf(u8, live_node_reply.body_json, "\"pot\":160") != null or
+        std.mem.indexOf(u8, live_node_reply.body_json, "\"pot\":160.000000") != null);
+
+    // Stale Save of A must refuse before creating a file.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const tmp_path = try std.fs.path.join(std.testing.allocator, &.{ abs, "stale-a.psol" });
+    defer std.testing.allocator.free(tmp_path);
+    const path_json = try std.fmt.allocPrint(std.testing.allocator, "{s}", .{std.json.fmt(tmp_path, .{})});
+    defer std.testing.allocator.free(path_json);
+    const stale_save_body = try std.fmt.allocPrint(
+        std.testing.allocator,
+        "{{\"path\":{s},\"solution_id\":\"{s}\"}}",
+        .{ path_json, id_a_token },
+    );
+    defer std.testing.allocator.free(stale_save_body);
+    var stale_save: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "save-stale"),
+        .op = try std.testing.allocator.dupe(u8, "save"),
+        .body_json = try std.testing.allocator.dupe(u8, stale_save_body),
+    };
+    defer stale_save.deinit();
+    var stale_save_reply = try handle(&state, stale_save);
+    defer stale_save_reply.deinit();
+    try std.testing.expect(!stale_save_reply.ok);
+    try std.testing.expectEqualStrings("expired_solution", stale_save_reply.error_code orelse "");
+    try std.testing.expectError(error.FileNotFound, tmp.dir.access("stale-a.psol", .{}));
+    try std.testing.expectEqual(id_b, state.session.solution_id);
+
+    // Matching Save returns the served identity.
+    const live_save_body = try std.fmt.allocPrint(
+        std.testing.allocator,
+        "{{\"path\":{s},\"solution_id\":\"{s}\"}}",
+        .{ path_json, id_b_token },
+    );
+    defer std.testing.allocator.free(live_save_body);
+    var live_save: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "save-live"),
+        .op = try std.testing.allocator.dupe(u8, "save"),
+        .body_json = try std.testing.allocator.dupe(u8, live_save_body),
+    };
+    defer live_save.deinit();
+    var live_save_reply = try handle(&state, live_save);
+    defer live_save_reply.deinit();
+    try std.testing.expect(live_save_reply.ok);
+    try std.testing.expect(std.mem.indexOf(u8, live_save_reply.body_json, "\"saved\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, live_save_reply.body_json, id_b_token) != null);
+
+    // Stale launch id is rejected before work.
+    var stale_launch: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "launch-stale"),
+        .op = try std.testing.allocator.dupe(u8, "node"),
+        .body_json = try std.fmt.allocPrint(
+            std.testing.allocator,
+            "{{\"node_id\":\"p0.t-1.r-1\",\"solution_id\":\"{s}\",\"launch_id\":\"other-launch\"}}",
+            .{id_b_token},
+        ),
+    };
+    defer stale_launch.deinit();
+    var stale_launch_reply = try handle(&state, stale_launch);
+    defer stale_launch_reply.deinit();
+    try std.testing.expect(!stale_launch_reply.ok);
+    try std.testing.expectEqualStrings("stale_launch", stale_launch_reply.error_code orelse "");
+}
+
+test "reallocated s1 after replacement still validates expected identity" {
+    // Within one launch, begin remints solution ids. After A→B, a body naming
+    // the retired id must fail even when the numeric token could later reuse.
+    const config =
+        \\street-config 1
+        \\board Ah Kd 7c
+        \\pot 100
+        \\stack 100
+        \\oop-range AcAd:1
+        \\ip-range KsKc:1
+        \\oop-flop-bets 
+        \\ip-flop-bets 
+        \\oop-turn-bets 
+        \\ip-turn-bets 
+        \\oop-river-bets 
+        \\ip-river-bets 
+        \\first-to-act 0
+        \\max-raises 0
+        \\allow-three-bet 1
+        \\all-in-threshold 0
+        \\pot-cap 0
+        \\rake-rate 0
+        \\rake-cap 0
+        \\memory-mib 256
+        \\threads 1
+        \\
+    ;
+    var state = try HostState.init(std.testing.allocator, "reallocated-s1");
+    defer state.deinit();
+    try state.session.begin(config);
+    try state.session.train(1);
+    const first = state.session.solution_id;
+    try state.session.begin(config);
+    try state.session.train(1);
+    const second = state.session.solution_id;
+    try std.testing.expect(second != first);
+
+    var first_buf: [32]u8 = undefined;
+    const first_token = try std.fmt.bufPrint(&first_buf, "s{d}", .{first});
+    var body_buf: [96]u8 = undefined;
+    const body = try std.fmt.bufPrint(
+        &body_buf,
+        "{{\"node_id\":\"p0.t-1.r-1\",\"solution_id\":\"{s}\"}}",
+        .{first_token},
+    );
+    var req: ipc.Envelope = .{
+        .allocator = std.testing.allocator,
+        .kind = .request,
+        .request_id = try std.testing.allocator.dupe(u8, "reuse-s1"),
+        .op = try std.testing.allocator.dupe(u8, "node"),
+        .body_json = try std.testing.allocator.dupe(u8, body),
+    };
+    defer req.deinit();
+    var reply = try handle(&state, req);
+    defer reply.deinit();
+    try std.testing.expect(!reply.ok);
+    try std.testing.expectEqualStrings("expired_solution", reply.error_code orelse "");
+    try std.testing.expectEqual(second, state.session.solution_id);
 }
