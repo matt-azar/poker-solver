@@ -125,7 +125,9 @@ const Scratch = struct {
 };
 
 /// Per-worker mutable buffers (C++ WorkerContext). Shared tables stay on FrozenCtx.
-const WorkerLocal = struct {
+/// Analysis that borrows a Session-warm FrozenCtx must allocate its own
+/// WorkerLocal so overlapping holders never mutate the same scratch (IPC audit §5).
+pub const WorkerLocal = struct {
     live0: []bool,
     live1: []bool,
     /// Compact live hand indexes for the current board (C++ BoardSupport::idx*).
@@ -147,7 +149,7 @@ const WorkerLocal = struct {
     scratch: [max_depth]Scratch = undefined,
     scratch_len: usize = 0,
 
-    fn init(allocator: std.mem.Allocator, n0: usize, n1: usize) FrozenError!WorkerLocal {
+    pub fn init(allocator: std.mem.Allocator, n0: usize, n1: usize) FrozenError!WorkerLocal {
         const wide = @max(n0, n1);
         // Compact card prefixes: one initial zero per card, then one weight per hole card.
         const block_cap = wide * 2 + 52;
@@ -181,7 +183,7 @@ const WorkerLocal = struct {
         return w;
     }
 
-    fn deinit(self: *WorkerLocal, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *WorkerLocal, allocator: std.mem.Allocator) void {
         var d: usize = 0;
         while (d < self.scratch_len) : (d += 1) {
             self.scratch[d].deinit(allocator);

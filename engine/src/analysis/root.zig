@@ -20,6 +20,7 @@ test {
     _ = node_id;
     _ = @import("phase4_test.zig");
     _ = @import("action_ev_rematch_test.zig");
+    _ = @import("action_ev_workspace_exclusivity_test.zig");
     _ = @import("equity_rematch_test.zig");
     _ = @import("zr162_compare_runouts_aev_test.zig");
 }

@@ -194,14 +194,42 @@ fn compatibleOpponentMass(
     }
 }
 
-/// Frozen StreetBatch-style action EV on a caller-owned FrozenCtx.
+/// Frozen StreetBatch-style action EV on a warm FrozenCtx's **immutable ranks**.
 /// Starting-board decisions only (turn/river pins stay on deal-by-deal).
 /// Prefer this after train: Session ranks are already warm — a fresh `initEval`
 /// rebuilds the entire flop/turn rank cache on every Study values request.
 /// Non-root nodes replay path reach so facing EV (Root x) stays O(hands·runouts).
+///
+/// Allocates exclusive mutable `WorkerLocal` scratch for this computation. Never
+/// writes `ctx.workspace` — Session `acquireFrozenCtxForAnalysis` can hand the
+/// same ctx to overlapping holders (IPC audit §5). Private scratch is not in the
+/// Session chance pool, so the walk is always serial here.
+/// `serial_chance` is retained for API stability; warm OnCtx ignores it.
 pub fn actionValuesFrozenOnCtx(
     allocator: std.mem.Allocator,
     ctx: *frozen_walk.FrozenCtx,
+    game: compile.CompiledGame,
+    published: training_state.PublishedPolicy,
+    node_index: u32,
+    serial_chance: bool,
+) ActionEvError!ActionValues {
+    _ = serial_chance;
+    var owned = frozen_walk.WorkerLocal.init(allocator, ctx.n0, ctx.n1) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidAnalysis,
+    };
+    defer owned.deinit(allocator);
+    // Private scratch cannot join Session chance-pool extras / result* buffers.
+    return actionValuesFrozenOnWorkspace(allocator, ctx, &owned, game, published, node_index, true);
+}
+
+/// Frozen action EV using caller-owned mutable scratch + shared immutable ranks.
+/// Safe for MT (`serial_chance=false`) only when `w` is exclusively owned for the
+/// walk and, if parallel, registered as the ctx chance-pool worker set.
+fn actionValuesFrozenOnWorkspace(
+    allocator: std.mem.Allocator,
+    ctx: *frozen_walk.FrozenCtx,
+    w: *frozen_walk.WorkerLocal,
     game: compile.CompiledGame,
     published: training_state.PublishedPolicy,
     node_index: u32,
@@ -216,7 +244,6 @@ pub fn actionValuesFrozenOnCtx(
     const sigma = try resolveSigma(allocator, game, published, &owned_sigma);
 
     ctx.ensureAllRanksReady() catch return error.InvalidAnalysis;
-    const w = &ctx.workspace;
 
     // Path-conditioned q (range × path σ). Root is a no-op (q = range_w → pi = 1).
     const reach = equity.replayReachWeights(allocator, game, sigma, node_index, -1, -1) catch |err| switch (err) {
@@ -338,7 +365,17 @@ pub fn actionValuesFrozen(
     else
         frozen_walk.FrozenCtx.initEval(allocator, game)) catch return error.InvalidAnalysis;
     defer ctx.deinit();
-    return actionValuesFrozenOnCtx(allocator, &ctx, game, published, node_index, use_threads <= 1);
+    // Caller-owned ctx: workspace is exclusive for this call, so MT first-card
+    // steal via ctx.workspace / extras / result* is safe.
+    return actionValuesFrozenOnWorkspace(
+        allocator,
+        &ctx,
+        &ctx.workspace,
+        game,
+        published,
+        node_index,
+        use_threads <= 1,
+    );
 }
 
 /// True when `deal` holes collide with a fixed turn and/or river (C++ oracle skip).
