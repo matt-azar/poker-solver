@@ -9,6 +9,7 @@ pub const budget_allocator = @import("budget_allocator.zig");
 pub const Session = session.Session;
 pub const Phase = session.Phase;
 pub const PublishedLease = session.PublishedLease;
+pub const SaveSourceLease = session.SaveSourceLease;
 pub const BaselineLease = session.BaselineLease;
 pub const BaselineSnapshot = session.BaselineSnapshot;
 pub const BudgetAllocator = budget_allocator.BudgetAllocator;
@@ -1364,6 +1365,138 @@ test "modern oversize tree mismatches legacy allow-all-in 0 → IncompatibleSave
     var other = try Session.init(std.testing.allocator);
     defer other.deinit();
     try std.testing.expectError(error.IncompatibleSave, other.open(path));
+}
+
+const river_cfg =
+    \\street-config 1
+    \\board Ah Kd 7c 4s 2h
+    \\pot 100
+    \\stack 100
+    \\oop-range AcAd:1
+    \\ip-range KsKc:1
+    \\first-to-act 0
+    \\max-raises 0
+    \\allow-three-bet 1
+    \\all-in-threshold 0
+    \\pot-cap 0
+    \\rake-rate 0
+    \\rake-cap 0
+    \\memory-mib 1024
+    \\threads 1
+    \\
+;
+
+test "save source lease blocks begin train and open" {
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(river_cfg);
+    try sess.train(1);
+    const prior_id = sess.solution_id;
+    const prior_phase = sess.phase;
+
+    var lease = try sess.acquireSaveSourceLease(.{});
+    defer lease.release();
+    try std.testing.expectEqual(prior_id, lease.solution_id);
+    try std.testing.expect(lease.has_training);
+
+    try std.testing.expectError(error.Busy, sess.begin(river_cfg));
+    try std.testing.expectError(error.Busy, sess.train(1));
+    try std.testing.expectEqual(prior_id, sess.solution_id);
+    try std.testing.expectEqual(prior_phase, sess.phase);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const path = try std.fs.path.join(std.testing.allocator, &.{ abs, "blocked_open.psol" });
+    defer std.testing.allocator.free(path);
+    // Write a valid checkpoint from a sibling session; Open must refuse while lease is held.
+    {
+        var writer = try Session.init(std.testing.allocator);
+        defer writer.deinit();
+        try writer.begin(river_cfg);
+        try writer.train(2);
+        try writer.save(path);
+    }
+    try std.testing.expectError(error.Busy, sess.open(path));
+    try std.testing.expectEqual(prior_id, sess.solution_id);
+    try std.testing.expectEqual(prior_phase, sess.phase);
+
+    lease.release();
+    try sess.train(1);
+    try std.testing.expect(sess.solution_id == prior_id);
+    try sess.open(path);
+    try std.testing.expect(sess.solution_id != prior_id);
+    try std.testing.expect(sess.phase == .published);
+}
+
+test "open install waits for published readers then swaps" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const abs = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    defer std.testing.allocator.free(abs);
+    const path = try std.fs.path.join(std.testing.allocator, &.{ abs, "reader_swap.psol" });
+    defer std.testing.allocator.free(path);
+
+    {
+        var writer = try Session.init(std.testing.allocator);
+        defer writer.deinit();
+        try writer.begin(river_cfg);
+        try writer.train(2);
+        try writer.save(path);
+    }
+
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(river_cfg);
+    try sess.train(1);
+    const prior_id = sess.solution_id;
+
+    var published = try sess.borrowPublished();
+    // Open stages then waits for readers before detach/swap (Begin discipline).
+    const OpenCtx = struct {
+        sess: *Session,
+        path: []const u8,
+        err: ?anyerror = null,
+        fn run(ctx: *@This()) void {
+            ctx.sess.open(ctx.path) catch |e| {
+                ctx.err = e;
+            };
+        }
+    };
+    var ctx = OpenCtx{ .sess = &sess, .path = path };
+    const thread = try std.Thread.spawn(.{}, OpenCtx.run, .{&ctx});
+
+    // Give the opener time to stage and block on the reader drain.
+    std.Thread.sleep(50 * std.time.ns_per_ms);
+    try std.testing.expectEqual(prior_id, sess.solution_id);
+
+    published.release();
+    thread.join();
+    try std.testing.expect(ctx.err == null);
+    try std.testing.expect(sess.solution_id != prior_id);
+    try std.testing.expect(sess.phase == .published);
+    try std.testing.expect(sess.published != null);
+}
+
+test "rejected open preserves prior solution under compiling gate" {
+    var sess = try Session.init(std.testing.allocator);
+    defer sess.deinit();
+    try sess.begin(river_cfg);
+    try sess.train(1);
+    const prior_id = sess.solution_id;
+    const prior_rev = sess.policyRevision();
+    const prior_phase = sess.phase;
+    const prior_trained = sess.training.?.trained;
+
+    try std.testing.expectError(error.LegacyCheckpointRejected, sess.open(
+        "tests/fixtures/psol/street_kind1_v2_cfrplus_tiny.psol",
+    ));
+    try std.testing.expectEqual(prior_id, sess.solution_id);
+    try std.testing.expectEqual(prior_rev, sess.policyRevision());
+    try std.testing.expectEqual(prior_phase, sess.phase);
+    try std.testing.expectEqual(prior_trained, sess.training.?.trained);
+    try std.testing.expect(sess.canContinue());
 }
 
 test {

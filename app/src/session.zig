@@ -74,6 +74,33 @@ pub const PublishedLease = struct {
     }
 };
 
+/// Save-time lease over game + published average (+ optional trainer tables).
+/// Holds `save_holders` for the whole serialization so Begin/Open detach and
+/// train/publish cannot replace or mutate source arrays mid-stream (IPC audit §2).
+pub const SaveSourceLease = struct {
+    session: ?*Session = null,
+    game: poker_engine.game.compile.CompiledGame,
+    /// Borrowed views — valid until `release`. Do not free.
+    average: []const f32 = &.{},
+    regret: []const f32 = &.{},
+    strategy_sum: []const f32 = &.{},
+    solution_id: u64 = 0,
+    revision: u64 = 0,
+    trained: i32 = 0,
+    has_training: bool = false,
+
+    pub fn release(self: *SaveSourceLease) void {
+        if (self.session) |sess| {
+            sess.releaseSaveSource();
+            self.session = null;
+        }
+    }
+
+    pub fn deinit(self: *SaveSourceLease) void {
+        self.release();
+    }
+};
+
 /// Immutable dual-session baseline retained across resolve-locked (C++ HeldSolution clone).
 /// Owns a copy of the pre-resolve published average so Compare can inspect it after the
 /// scenario revision replaces Session.published.
@@ -170,6 +197,9 @@ pub const Session = struct {
     /// Analysis workers holding `frozen_ctx` for Study values/equity (warm ranks).
     /// Train / begin / setThreads wait until zero before mutating or freeing ctx.
     frozen_analysis_holds: u32 = 0,
+    /// Active Save leases holding game/average/trainer arrays stable for streaming.
+    /// Begin/Open drain this before detach; train/publish refuse or wait while held.
+    save_holders: u32 = 0,
     /// Protects phase / published swap / reader count (mid-train Study browse).
     mu: std.Thread.Mutex = .{},
     readers: u32 = 0,
@@ -281,6 +311,18 @@ pub const Session = struct {
         return self.phase == .training or self.phase == .compiling;
     }
 
+    /// Caller holds `mu`. True when a Save lease or replace-busy phase blocks mutation.
+    fn busyForMutationLocked(self: *const Session) bool {
+        return self.busyForReplace() or self.save_holders != 0;
+    }
+
+    /// Caller holds `mu`. Drain Study / Compare / analysis / Save leases before detach.
+    fn waitQuietForReplaceLocked(self: *Session) void {
+        while (self.readers != 0 or self.baseline_readers != 0 or self.frozen_analysis_holds != 0 or self.save_holders != 0) {
+            self.quiet.wait(&self.mu);
+        }
+    }
+
     /// Rough peak for compiled game + training tables + one published average.
     fn estimateSolutionBytes(game: poker_engine.game.compile.CompiledGame) u64 {
         const te: u64 = @intCast(@max(game.table_entries, 0));
@@ -323,9 +365,7 @@ pub const Session = struct {
 
     pub fn deinit(self: *Session) void {
         self.mu.lock();
-        while (self.readers != 0 or self.baseline_readers != 0 or self.frozen_analysis_holds != 0) {
-            self.quiet.wait(&self.mu);
-        }
+        self.waitQuietForReplaceLocked();
         self.mu.unlock();
         self.clearSolution();
         const parent = self.parent;
@@ -427,9 +467,10 @@ pub const Session = struct {
         }
     };
 
-    /// Caller holds `mu` and has waited until `readers == 0` and
-    /// `baseline_readers == 0`. Moves owned solution memory out for
-    /// free-after-unlock; resets Session bookkeeping.
+    /// Caller holds `mu` and has waited via `waitQuietForReplaceLocked`
+    /// (`readers` / `baseline_readers` / `frozen_analysis_holds` / `save_holders`
+    /// all zero). Moves owned solution memory out for free-after-unlock;
+    /// resets Session bookkeeping.
     fn detachSolutionLocked(self: *Session) DetachedSolution {
         var out = DetachedSolution.empty(self.allocator);
         if (self.frozen_ctx) |ctx| {
@@ -607,7 +648,7 @@ pub const Session = struct {
     /// Stop (`requestStop`) aborts at compile stage boundaries without installing (ZR-151).
     pub fn begin(self: *Session, config_text: []const u8) SessionError!void {
         self.mu.lock();
-        if (self.busyForReplace()) {
+        if (self.busyForMutationLocked()) {
             self.mu.unlock();
             return error.Busy;
         }
@@ -705,9 +746,7 @@ pub const Session = struct {
             self.mu.unlock();
             return error.Cancelled;
         }
-        while (self.readers != 0 or self.baseline_readers != 0 or self.frozen_analysis_holds != 0) {
-            self.quiet.wait(&self.mu);
-        }
+        self.waitQuietForReplaceLocked();
         detached = self.detachSolutionLocked();
         self.budget.setLimit(budget_bytes);
         self.config_text = owned_config;
@@ -773,8 +812,8 @@ pub const Session = struct {
     }
 
     fn installPublishedLocked(self: *Session, next: poker_engine.solve.training_state.PublishedPolicy) void {
-        // Caller holds `mu`. Wait until no Study readers hold the prior average.
-        while (self.readers != 0 or self.publishing_in_place) {
+        // Caller holds `mu`. Wait until no Study readers / Save leases hold the prior average.
+        while (self.readers != 0 or self.publishing_in_place or self.save_holders != 0) {
             self.quiet.wait(&self.mu);
         }
         if (self.published) |*old| {
@@ -856,7 +895,8 @@ pub const Session = struct {
         else
             &.{};
         // Wait until quiet — required for in-place rewrite and for a stable swap.
-        while (self.readers != 0 or self.publishing_in_place) {
+        // Save leases hold source averages; do not rewrite under an active Save.
+        while (self.readers != 0 or self.publishing_in_place or self.save_holders != 0) {
             self.quiet.wait(&self.mu);
         }
 
@@ -1130,6 +1170,11 @@ pub const Session = struct {
 
     pub fn train(self: *Session, iterations: i32) SessionError!void {
         self.mu.lock();
+        // Save holds game/average/regret/strategy_sum for the whole stream.
+        if (self.save_holders != 0) {
+            self.mu.unlock();
+            return error.Busy;
+        }
         // Recover sticky `.failed` before the ready-phase gate (ZR-123).
         // ZR-145: only when trainer tables are still resume-safe (`has_training`).
         if (self.phase == .failed) {
@@ -1603,6 +1648,54 @@ pub const Session = struct {
         if (self.readers == 0) self.quiet.broadcast();
     }
 
+    /// Acquire a Save source lease (game + published average + optional trainer tables).
+    /// Holds `save_holders` until `release` so replace/train/publish cannot mutate
+    /// the arrays while `writeFileMemoryOrder` streams them.
+    pub fn acquireSaveSourceLease(self: *Session, opts: SaveOptions) SessionError!SaveSourceLease {
+        self.mu.lock();
+        defer self.mu.unlock();
+        if (self.busyForMutationLocked()) return error.Busy;
+        while (self.publishing_in_place) {
+            self.quiet.wait(&self.mu);
+        }
+        const game = self.game orelse return error.InvalidSession;
+        const published = self.published orelse return error.NothingPublished;
+        var regret: []const f32 = &.{};
+        var strategy_sum: []const f32 = &.{};
+        var trained: i32 = published.trained;
+        var has_training = false;
+        if (!opts.study_only and self.has_training) {
+            const state = self.training orelse return error.InvalidSession;
+            // Save claims the last committed iteration when trainer tables exist.
+            std.debug.assert(self.last_committed_trained == state.trained);
+            regret = state.regret;
+            strategy_sum = state.strategy_sum;
+            trained = state.trained;
+            has_training = true;
+            std.debug.assert(regret.len == published.average.len);
+            std.debug.assert(strategy_sum.len == published.average.len);
+        }
+        self.save_holders += 1;
+        return .{
+            .session = self,
+            .game = game,
+            .average = published.average,
+            .regret = regret,
+            .strategy_sum = strategy_sum,
+            .solution_id = self.solution_id,
+            .revision = published.revision,
+            .trained = trained,
+            .has_training = has_training,
+        };
+    }
+
+    pub fn releaseSaveSource(self: *Session) void {
+        self.mu.lock();
+        defer self.mu.unlock();
+        if (self.save_holders > 0) self.save_holders -= 1;
+        if (self.save_holders == 0) self.quiet.broadcast();
+    }
+
     pub fn pause(self: *Session) SessionError!void {
         self.mu.lock();
         defer self.mu.unlock();
@@ -1849,29 +1942,31 @@ pub const Session = struct {
     }
 
     /// Save with explicit Study-only vs Continue/checkpoint mode.
+    /// Holds a `SaveSourceLease` for the whole stream so source arrays stay stable
+    /// through serialization (atomic rename still publishes the destination file).
     pub fn saveWithOptions(self: *Session, path: []const u8, opts: SaveOptions) SessionError!void {
         self.mu.lock();
-        if (self.busyForReplace()) {
+        if (self.busyForMutationLocked()) {
             self.mu.unlock();
             return error.Busy;
         }
         self.mu.unlock();
         // Checkpoint average must match the completed iteration being claimed.
+        // Publish before taking the Save lease so ensurePublishedExact can rewrite.
         try self.ensurePublishedExact();
         std.debug.assert(self.published != null);
-        if (!opts.study_only) {
-            if (self.training) |ts| {
-                // Save claims the last committed iteration when trainer tables exist.
-                std.debug.assert(self.last_committed_trained == ts.trained);
-            }
-        }
 
-        const game = self.game orelse return error.InvalidSession;
-        const published = self.published orelse return error.NothingPublished;
+        var lease = try self.acquireSaveSourceLease(opts);
+        defer lease.release();
+        std.debug.assert(lease.average.len != 0 or lease.game.table_entries == 0);
+        if (lease.has_training) {
+            std.debug.assert(lease.regret.len == lease.average.len);
+            std.debug.assert(lease.strategy_sum.len == lease.average.len);
+        }
 
         // Layout lives on the parent allocator so Save scratch is not charged against
         // the solution memory-mib ceiling (table conversion no longer copies either).
-        var layout = poker_engine.game.compile.buildPsolLayoutMap(self.parent, game) catch |err| {
+        var layout = poker_engine.game.compile.buildPsolLayoutMap(self.parent, lease.game) catch |err| {
             if (err == error.OutOfMemory) return error.OutOfMemory;
             return error.InvalidSession;
         };
@@ -1886,16 +1981,18 @@ pub const Session = struct {
         if (opts.study_only) {
             std.debug.assert(!doc.hasTraining());
         }
+        if (doc.hasTraining()) {
+            doc.trained = lease.trained;
+        }
 
         var tables = poker_formats.MemoryOrderTables{
-            .game = game,
+            .game = lease.game,
             .layout = layout,
-            .average = published.average,
+            .average = lease.average,
         };
         if (doc.hasTraining()) {
-            const state = self.training orelse return error.InvalidSession;
-            tables.regret = state.regret;
-            tables.strategy_sum = state.strategy_sum;
+            tables.regret = lease.regret;
+            tables.strategy_sum = lease.strategy_sum;
             std.debug.assert(tables.regret.len == tables.average.len);
             std.debug.assert(tables.strategy_sum.len == tables.average.len);
         }
@@ -1907,8 +2004,23 @@ pub const Session = struct {
     }
 
     /// Open for study (and optional resume). Fail-closed: on error prior session unchanged.
+    /// Stages and validates off the session mutex, then commits with the same
+    /// reader-drain + short locked swap + free-after-unlock discipline as Begin.
     pub fn open(self: *Session, path: []const u8) SessionError!void {
-        if (self.busyForReplace()) return error.Busy;
+        self.mu.lock();
+        if (self.busyForMutationLocked()) {
+            self.mu.unlock();
+            return error.Busy;
+        }
+        const prior_phase = self.phase;
+        // Mark compiling so Save/Begin/train busy guards agree while Open stages.
+        self.phase = .compiling;
+        self.mu.unlock();
+        errdefer {
+            self.mu.lock();
+            if (self.phase == .compiling) self.phase = prior_phase;
+            self.mu.unlock();
+        }
 
         // Peek config on parent (street-config text only) to learn memory-mib
         // before charging the full streamed document against the shared ceiling.
@@ -1980,6 +2092,7 @@ pub const Session = struct {
         const doc_frozen = doc.frozen;
         const doc_metrics = doc.metrics;
         const doc_has_metrics = doc.has_metrics;
+        const open_threads = clampThreads(spec.threads);
 
         const average_mem = self.allocator.alloc(f32, @intCast(game.table_entries)) catch return error.BudgetExceeded;
         var average_owned = true;
@@ -2044,8 +2157,19 @@ pub const Session = struct {
         const owned_edits = self.allocator.dupe(u8, doc.strategy_edits_text) catch return error.BudgetExceeded;
         errdefer self.allocator.free(owned_edits);
 
-        // Install only after full validation.
-        self.clearSolution();
+        // Install only after full validation (Begin-style swap).
+        // Detach under the session mutex after draining leases, then free the
+        // prior solution *after* unlock so status/Stop stay live.
+        var detached = DetachedSolution.empty(self.allocator);
+        defer detached.deinit();
+
+        self.mu.lock();
+        if (self.phase != .compiling and self.busyForReplace()) {
+            self.mu.unlock();
+            return error.Busy;
+        }
+        self.waitQuietForReplaceLocked();
+        detached = self.detachSolutionLocked();
         self.budget.setLimit(budget_bytes);
         self.config_text = owned_config;
         self.game = game;
@@ -2061,7 +2185,7 @@ pub const Session = struct {
         self.frozen = doc_frozen;
         self.metrics = doc_metrics;
         self.has_metrics = doc_has_metrics;
-        self.threads = clampThreads(spec.threads);
+        self.threads = open_threads;
         self.has_training = want_training;
         self.memory_budget_bytes = budget_bytes;
         self.solution_id = self.next_id;
@@ -2087,6 +2211,10 @@ pub const Session = struct {
             std.debug.assert(self.last_committed_trained == 0);
             std.debug.assert(!self.canContinue());
         }
+        self.mu.unlock();
+        // Heavy free runs here so status can take session.mu during teardown.
+        detached.deinit();
+        detached = DetachedSolution.empty(self.allocator);
     }
 
     pub fn policyRevision(self: Session) u64 {
