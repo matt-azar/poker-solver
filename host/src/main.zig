@@ -126,7 +126,6 @@ pub fn shutdownOnParentEof(state: *dispatch.HostState) void {
     // Continue is not sticky-cancelled. Parent-gone must remain latched through
     // teardown (audit §8): re-assert after joins so pool/train/Compare cleanup
     // cannot erase the EOF stop signal the test and status observers rely on.
-    // Same fix as #479 tip d88639c.
     state.session.requestStop();
 }
 
