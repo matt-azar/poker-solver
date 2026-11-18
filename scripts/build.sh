@@ -34,3 +34,5 @@ python3 scripts/zig/stop-close-responsive-smoke.py "$BIN"
 # late replies must not overwrite solution; memory settles; stdin EOF exits.
 # Windows packaged Study overlap suite waits for ma1pc (ZR-147 follow-up).
 python3 scripts/zig/study-overlap-actions-smoke.py "$BIN"
+# Audit Track 2/4: Status stays available under resolve_locked / Compare / bulk values.
+python3 scripts/zig/status-vs-mutation-smoke.py "$BIN"

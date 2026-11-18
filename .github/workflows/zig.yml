@@ -119,6 +119,12 @@ jobs:
           set -euo pipefail
           python3 scripts/zig/study-overlap-actions-smoke.py ./zig-out/bin/solver-engine
 
+      # Audit Track 2/4: Status under resolve_locked / Compare / bulk values.
+      - name: Status vs mutation smoke
+        run: |
+          set -euo pipefail
+          python3 scripts/zig/status-vs-mutation-smoke.py ./zig-out/bin/solver-engine
+
   zig-windows:
     runs-on: windows-latest
     timeout-minutes: 45
