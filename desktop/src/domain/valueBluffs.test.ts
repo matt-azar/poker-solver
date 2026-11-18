@@ -7,6 +7,7 @@ import {
   callChildIdFromFacing,
   dominantBettingActionIndices,
   equityHandsForDominantSizes,
+  equityHandsForSelectedSizes,
   equityPassesThreshold,
   facingChildIdForBet,
   filterValueBluffsBySizes,
@@ -18,6 +19,7 @@ import {
   sortValueBluffs,
   topBettingAction,
   topBettingActionIndex,
+  type ValueBluffsRow,
   valueBluffsBettingActionIndices,
 } from "./valueBluffs";
 import { fetchPostCallEquityHands } from "./valueBluffsPostCall";
@@ -145,6 +147,34 @@ describe("call-path helpers", () => {
     expect(rows.map((row) => row.combo)).toEqual(["AhAd", "KhKd"]);
     expect(rows[0]!.equity).toBeCloseTo(0.11, 12);
     expect(rows[1]!.equity).toBeCloseTo(0.22, 12);
+  });
+
+  it("joins after-call equity from the selected size's Call branch", () => {
+    const node = decision({
+      actions: ["Check", "Bet 50", "Bet 100"],
+      combos: ["7h2d"],
+      strategy: [[0.2, 0.3, 0.5]], // mixed: small 30%, large 50%
+    });
+    const handsByBetAction = new Map([
+      [1, [{ combo: "7h2d", equity: 0.12, weight: 1 }]], // small Call
+      [2, [{ combo: "7h2d", equity: 0.08, weight: 1 }]], // large Call
+    ]);
+    const dominant = equityHandsForSelectedSizes({ node, handsByBetAction });
+    expect(dominant).toEqual([{ combo: "7h2d", equity: 0.08, weight: 1 }]);
+
+    const smallOnly = equityHandsForSelectedSizes({
+      node,
+      handsByBetAction,
+      enabledActionIndices: new Set([1]),
+    });
+    expect(smallOnly).toEqual([{ combo: "7h2d", equity: 0.12, weight: 1 }]);
+
+    const largeOnly = equityHandsForSelectedSizes({
+      node,
+      handsByBetAction,
+      enabledActionIndices: new Set([2]),
+    });
+    expect(largeOnly).toEqual([{ combo: "7h2d", equity: 0.08, weight: 1 }]);
   });
 });
 
@@ -290,19 +320,28 @@ describe("listValueBluffs", () => {
     expect(MIN_VALUE_BLUFFS_REACH_MASS).toBe(0.005);
   });
 
-  it("filters rows by enabled dominant bet sizes", () => {
+  it("keeps mixed-size combos at the selected size frequency", () => {
     const rows = listValueBluffs({
       node,
       equityHands: hands,
       threshold: DEFAULT_VALUE_BLUFFS_EQUITY_THRESHOLD,
     });
+    // 7h2d bets Bet50 30% + Bet100 50% (dominant Bet100). Selecting only Bet50
+    // must keep it at 30%, not drop it.
+    const smallOnly = filterValueBluffsBySizes(rows, new Set([1]), node);
+    expect(smallOnly.map((row) => row.combo)).toEqual(["7h2d", "KhKd"]);
+    const mixed = smallOnly.find((row) => row.combo === "7h2d")!;
+    expect(mixed.betFreq).toBeCloseTo(0.3, 12);
+    expect(mixed.topBetAction).toBe("Bet 50");
+    expect(mixed.topBetActionIndex).toBe(1);
+
+    const largeAndAllin = filterValueBluffsBySizes(rows, new Set([2, 3]), node);
+    expect(largeAndAllin.map((row) => row.combo)).toEqual(["2c2d", "7h2d"]);
     expect(
-      filterValueBluffsBySizes(rows, new Set([1])).map((row) => row.combo),
-    ).toEqual(["KhKd"]);
-    expect(
-      filterValueBluffsBySizes(rows, new Set([2, 3])).map((row) => row.combo),
-    ).toEqual(["2c2d", "7h2d"]);
-    expect(filterValueBluffsBySizes(rows, new Set())).toEqual([]);
+      largeAndAllin.find((row) => row.combo === "7h2d")!.betFreq,
+    ).toBeCloseTo(0.5, 12);
+
+    expect(filterValueBluffsBySizes(rows, new Set(), node)).toEqual([]);
   });
 
   it("drops combos with reach mass below 0.005", () => {
@@ -356,6 +395,63 @@ describe("listValueBluffs", () => {
     expect(
       sortValueBluffs(base, "betFreq", "asc").map((row) => row.combo),
     ).toEqual(["7h2d", "KhKd", "AhAd"]);
+  });
+
+  it("keeps missing EVs last in both sort directions", () => {
+    const rows: ValueBluffsRow[] = [
+      {
+        combo: "AhAd",
+        betFreq: 0.5,
+        ev: 1.0,
+        equity: 0.1,
+        topBetAction: "Bet 50",
+        topBetActionIndex: 0,
+        weight: 1,
+        reach: 1,
+      },
+      {
+        combo: "KhKd",
+        betFreq: 0.5,
+        ev: null,
+        equity: 0.1,
+        topBetAction: "Bet 50",
+        topBetActionIndex: 0,
+        weight: 1,
+        reach: 1,
+      },
+      {
+        combo: "7h2d",
+        betFreq: 0.5,
+        ev: -0.5,
+        equity: 0.1,
+        topBetAction: "Bet 50",
+        topBetActionIndex: 0,
+        weight: 1,
+        reach: 1,
+      },
+      {
+        combo: "2c2d",
+        betFreq: 0.5,
+        ev: null,
+        equity: 0.1,
+        topBetAction: "Bet 50",
+        topBetActionIndex: 0,
+        weight: 1,
+        reach: 1,
+      },
+    ];
+    expect(sortValueBluffs(rows, "ev", "asc").map((row) => row.combo)).toEqual([
+      "7h2d",
+      "AhAd",
+      "2c2d",
+      "KhKd",
+    ]);
+    expect(sortValueBluffs(rows, "ev", "desc").map((row) => row.combo)).toEqual([
+      "AhAd",
+      "7h2d",
+      "2c2d",
+      "KhKd",
+    ]);
   });
 
   it("excludes missing equity and check-only / high-equity hands", () => {

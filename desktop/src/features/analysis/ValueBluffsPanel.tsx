@@ -14,6 +14,7 @@ import {
   DEFAULT_VALUE_BLUFFS_EQUITY_THRESHOLD,
   MIN_VALUE_BLUFFS_BET_FREQ,
   MIN_VALUE_BLUFFS_REACH_MASS,
+  equityHandsForSelectedSizes,
   filterValueBluffsBySizes,
   formatReachMass,
   listValueBluffs,
@@ -32,7 +33,8 @@ import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
 import { useValueBluffsHighlightStore } from "../../state/valueBluffsHighlightStore";
 
-const DISPLAY_CAP = 50;
+/** Initial / page size for the hand list; Show more reveals the next page. */
+export const VALUE_BLUFFS_DISPLAY_CAP = 50;
 
 interface EquityPayload {
   pending?: boolean;
@@ -44,6 +46,7 @@ interface EquityPayload {
 interface PostCallCache {
   key: string;
   hands: EquityHandRow[];
+  handsByBetAction: Map<number, EquityHandRow[]>;
   error: string | null;
 }
 
@@ -166,6 +169,7 @@ export function ValueBluffsPanel() {
   const [sortDir, setSortDir] = useState<ValueBluffsSortDir>("desc");
   /** Absent key = enabled (default all on). Local only — does not navigate. */
   const [sizeEnabled, setSizeEnabled] = useState<Record<number, boolean>>({});
+  const [visibleLimit, setVisibleLimit] = useState(VALUE_BLUFFS_DISPLAY_CAP);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [postCall, setPostCall] = useState<PostCallCache | null>(null);
   const [postCallPending, setPostCallPending] = useState(false);
@@ -285,6 +289,7 @@ export function ValueBluffsPanel() {
         const cached: PostCallCache = {
           key,
           hands: result.hands,
+          handsByBetAction: result.handsByBetAction,
           error: result.error,
         };
         cacheRef.current = cached;
@@ -339,13 +344,6 @@ export function ValueBluffsPanel() {
       ? postCallCacheKey(solutionId, currentNode.node_id, revision)
       : "";
 
-  const equityHands = useMemo(() => {
-    if (equityMode === "after_call") {
-      return postCall?.key === expectedPostCallKey ? postCall.hands : null;
-    }
-    return equityHandsForNode(equity, currentNode?.player) as EquityHandRow[] | null;
-  }, [equityMode, postCall, expectedPostCallKey, equity, currentNode?.player]);
-
   const bettingActionIndices = useMemo(
     () => valueBluffsBettingActionIndices(currentNode?.actions),
     [currentNode?.actions],
@@ -366,6 +364,32 @@ export function ValueBluffsPanel() {
     }
     return enabled;
   }, [bettingActionIndices, sizeEnabled]);
+
+  const equityHands = useMemo(() => {
+    if (equityMode === "after_call") {
+      if (postCall?.key !== expectedPostCallKey) {
+        return null;
+      }
+      if (postCall.handsByBetAction.size > 0) {
+        return equityHandsForSelectedSizes({
+          node: currentNode,
+          handsByBetAction: postCall.handsByBetAction,
+          enabledActionIndices: enabledSizeIndices,
+          minBetFreq,
+        });
+      }
+      return postCall.hands;
+    }
+    return equityHandsForNode(equity, currentNode?.player) as EquityHandRow[] | null;
+  }, [
+    equityMode,
+    postCall,
+    expectedPostCallKey,
+    equity,
+    currentNode,
+    enabledSizeIndices,
+    minBetFreq,
+  ]);
 
   const pot = actionSizePotBasis(
     currentNode,
@@ -389,7 +413,11 @@ export function ValueBluffsPanel() {
       nodeValues: valuesForNode ? nodeValues : null,
       evDisplayBasis,
     });
-    const sized = filterValueBluffsBySizes(listed, enabledSizeIndices);
+    const sized = filterValueBluffsBySizes(
+      listed,
+      enabledSizeIndices,
+      currentNode,
+    );
     return sortValueBluffs(sized, sortKey, sortDir);
   }, [
     currentNode,
@@ -408,7 +436,22 @@ export function ValueBluffsPanel() {
     sortDir,
   ]);
 
-  const visible = rows.slice(0, DISPLAY_CAP);
+  // Reset pagination when the match set identity changes.
+  useEffect(() => {
+    setVisibleLimit(VALUE_BLUFFS_DISPLAY_CAP);
+  }, [
+    currentNode?.node_id,
+    equityMode,
+    equityCompare,
+    threshold,
+    minBetFreq,
+    reachFloor,
+    enabledSizeIndices,
+    sortKey,
+    sortDir,
+  ]);
+
+  const visible = rows.slice(0, visibleLimit);
   const thresholdLabel = `${Math.round(threshold * 100)}%`;
   const betFloorLabel = `${Math.round(minBetFreq * 1000) / 10}%`;
   const reachFloorLabel = reachFloor.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
@@ -483,6 +526,7 @@ export function ValueBluffsPanel() {
     setSizeEnabled({});
     setSortKey("betFreq");
     setSortDir("desc");
+    setVisibleLimit(VALUE_BLUFFS_DISPLAY_CAP);
   };
 
   return (
@@ -541,7 +585,7 @@ export function ValueBluffsPanel() {
             type="button"
             className="toolbar-btn"
             aria-pressed={equityMode === "after_call"}
-            title="Equity on the Call child after the dominant bet/raise"
+            title="Equity on the Call child after the selected bet/raise"
             onClick={() => setEquityMode("after_call")}
           >
             After call
@@ -661,7 +705,7 @@ export function ValueBluffsPanel() {
         Equity {compareSymbol} {thresholdLabel} ({modeLabel});{" "}
         bet/raise/all-in ≥ {betFloorLabel}; reach ≥ {reachFloorLabel}
         {equityMode === "after_call"
-          ? "; each hand uses its highest-frequency bet/raise size"
+          ? "; after-call equity from selected bet size"
           : ""}
         .
       </p>
@@ -684,9 +728,9 @@ export function ValueBluffsPanel() {
           {postCallMessage && equityMode === "after_call" ? (
             <p className="equity-note muted">{postCallMessage}</p>
           ) : null}
-          {rows.length > DISPLAY_CAP ? (
+          {rows.length > visible.length ? (
             <p className="equity-note muted">
-              Showing {DISPLAY_CAP} of {rows.length}
+              Showing {visible.length} of {rows.length}
             </p>
           ) : null}
           <table className="data-table">
@@ -732,6 +776,17 @@ export function ValueBluffsPanel() {
               ))}
             </tbody>
           </table>
+          {rows.length > visible.length ? (
+            <button
+              type="button"
+              className="toolbar-btn"
+              onClick={() =>
+                setVisibleLimit((limit) => limit + VALUE_BLUFFS_DISPLAY_CAP)
+              }
+            >
+              Show more
+            </button>
+          ) : null}
         </>
       )}
     </div>

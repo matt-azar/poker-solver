@@ -36,6 +36,15 @@ describe("fetchPostCallEquityHands host prefer path", () => {
         { combo: "AhKd", equity: 0.61, weight: 1 },
         { combo: "2c2d", equity: 0.42, weight: 1 },
       ],
+      hands_by_action: [
+        {
+          action_index: 1,
+          hands: [
+            { combo: "AhKd", equity: 0.61, weight: 1 },
+            { combo: "2c2d", equity: 0.42, weight: 1 },
+          ],
+        },
+      ],
       call_node_ids: ["call-1"],
       missing_call_count: 0,
     }));
@@ -56,6 +65,7 @@ describe("fetchPostCallEquityHands host prefer path", () => {
     expect(result.hands).toHaveLength(2);
     expect(result.hands[0]?.equity).toBeCloseTo(0.61, 12);
     expect(result.callNodeIds).toEqual(["call-1"]);
+    expect(result.handsByBetAction.get(1)?.[0]?.equity).toBeCloseTo(0.61, 12);
   });
 
   it("falls back to multi-getNode when host op throws", async () => {

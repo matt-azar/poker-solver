@@ -115,12 +115,75 @@ export function valueBluffsBettingActionIndices(
 }
 
 /**
- * Keep rows whose dominant betting size is enabled. Empty enabled set → [].
- * Does not navigate the tree; callers own toggle state.
+ * Sum of probabilities on enabled betting actions for one strategy row.
+ * Non-betting indices in the set are ignored.
+ */
+export function enabledBettingFrequency(
+  strategyRow: number[] | null | undefined,
+  actions: string[] | null | undefined,
+  enabledActionIndices: ReadonlySet<number>,
+): number {
+  if (!strategyRow?.length || !actions?.length || !enabledActionIndices.size) {
+    return 0;
+  }
+  let sum = 0;
+  for (const index of enabledActionIndices) {
+    if (index < 0 || index >= actions.length || index >= strategyRow.length) {
+      continue;
+    }
+    if (!isValueBluffsBettingAction(actions[index] ?? "")) {
+      continue;
+    }
+    const probability = Number(strategyRow[index]);
+    if (Number.isFinite(probability) && probability > 0) {
+      sum += probability;
+    }
+  }
+  return sum;
+}
+
+/**
+ * Max-prob betting action among enabled indices (ties → first by action order).
+ * Returns -1 when no enabled betting action has positive mass.
+ */
+export function topBettingActionIndexAmong(
+  strategyRow: number[] | null | undefined,
+  actions: string[] | null | undefined,
+  enabledActionIndices: ReadonlySet<number>,
+): number {
+  if (!strategyRow?.length || !actions?.length || !enabledActionIndices.size) {
+    return -1;
+  }
+  let bestIndex = -1;
+  let bestProb = -1;
+  const ordered = [...enabledActionIndices].sort((left, right) => left - right);
+  for (const index of ordered) {
+    if (index < 0 || index >= actions.length || index >= strategyRow.length) {
+      continue;
+    }
+    if (!isValueBluffsBettingAction(actions[index] ?? "")) {
+      continue;
+    }
+    const probability = Number(strategyRow[index]);
+    if (!Number.isFinite(probability) || probability <= bestProb) {
+      continue;
+    }
+    bestProb = probability;
+    bestIndex = index;
+  }
+  return bestIndex;
+}
+
+/**
+ * Keep combos with positive frequency on any enabled bet size.
+ * Rewrites betFreq / topBetAction to the selected size(s) when `node` strategy
+ * is available — mixed-size hands stay visible at the selected size's frequency.
+ * Empty enabled set → []. Does not navigate the tree.
  */
 export function filterValueBluffsBySizes(
   rows: readonly ValueBluffsRow[],
   enabledActionIndices: ReadonlySet<number>,
+  node?: NodePayload | null,
 ): ValueBluffsRow[] {
   if (!rows.length) {
     return [];
@@ -128,11 +191,59 @@ export function filterValueBluffsBySizes(
   if (!enabledActionIndices.size) {
     return [];
   }
-  return rows.filter(
-    (row) =>
+  const actions = node?.actions ?? null;
+  const combos = node?.combos ?? null;
+  const strategy = node?.strategy ?? null;
+  const comboIndex = new Map<string, number>();
+  if (combos?.length) {
+    for (let index = 0; index < combos.length; index += 1) {
+      const combo = combos[index];
+      if (combo) {
+        comboIndex.set(comboKey(combo), index);
+      }
+    }
+  }
+  const canRewrite = Boolean(actions?.length && strategy?.length && comboIndex.size);
+
+  const out: ValueBluffsRow[] = [];
+  for (const row of rows) {
+    if (canRewrite) {
+      const handIndex = comboIndex.get(comboKey(row.combo));
+      if (handIndex == null) {
+        continue;
+      }
+      const strategyRow = strategy![handIndex];
+      const freq = enabledBettingFrequency(
+        strategyRow,
+        actions,
+        enabledActionIndices,
+      );
+      if (!(freq > 0)) {
+        continue;
+      }
+      const topIndex = topBettingActionIndexAmong(
+        strategyRow,
+        actions,
+        enabledActionIndices,
+      );
+      out.push({
+        ...row,
+        betFreq: freq,
+        topBetActionIndex: topIndex,
+        topBetAction:
+          topIndex >= 0 ? (actions![topIndex] ?? null) : null,
+      });
+      continue;
+    }
+    // Legacy fallback when strategy is unavailable: dominant-size gate.
+    if (
       row.topBetActionIndex >= 0 &&
-      enabledActionIndices.has(row.topBetActionIndex),
-  );
+      enabledActionIndices.has(row.topBetActionIndex)
+    ) {
+      out.push(row);
+    }
+  }
+  return out;
 }
 
 /** True when the label is a Call (not Check). */
@@ -263,21 +374,35 @@ export function dominantBettingActionIndices(
 
 /**
  * Build acting-seat equity rows for Mode B: each combo uses equity from the
- * Call-child payload of its dominant betting size.
+ * Call-child of its max-prob betting size among `enabledActionIndices`
+ * (default: all betting sizes → same as dominant-size join).
  */
-export function equityHandsForDominantSizes(args: {
+export function equityHandsForSelectedSizes(args: {
   node: NodePayload | null | undefined;
   /** betActionIndex → acting-seat equity hands at that size's Call child */
   handsByBetAction: Map<number, EquityHandRow[] | null | undefined>;
+  /** When set, join via the top enabled size with positive mass. */
+  enabledActionIndices?: ReadonlySet<number> | null;
   minBetFreq?: number;
 }): EquityHandRow[] {
-  const { node, handsByBetAction, minBetFreq = MIN_VALUE_BLUFFS_BET_FREQ } = args;
+  const {
+    node,
+    handsByBetAction,
+    enabledActionIndices = null,
+    minBetFreq = MIN_VALUE_BLUFFS_BET_FREQ,
+  } = args;
   if (!isDecisionWithStrategy(node)) {
     return [];
   }
   const actions = node!.actions ?? [];
   const combos = node!.combos ?? [];
   const strategy = node!.strategy ?? [];
+  const enabled =
+    enabledActionIndices ??
+    new Set(valueBluffsBettingActionIndices(actions));
+  if (!enabled.size) {
+    return [];
+  }
   const out: EquityHandRow[] = [];
   for (let index = 0; index < combos.length; index += 1) {
     const combo = combos[index];
@@ -288,7 +413,11 @@ export function equityHandsForDominantSizes(args: {
     if (!(betFrequency(row, actions) >= minBetFreq)) {
       continue;
     }
-    const actionIndex = topBettingActionIndex(row, actions);
+    // Require mass on an enabled size when filtering; all-on uses the same set.
+    if (!(enabledBettingFrequency(row, actions, enabled) > 0)) {
+      continue;
+    }
+    const actionIndex = topBettingActionIndexAmong(row, actions, enabled);
     if (actionIndex < 0) {
       continue;
     }
@@ -308,6 +437,19 @@ export function equityHandsForDominantSizes(args: {
     });
   }
   return out;
+}
+
+/**
+ * Build acting-seat equity rows for Mode B: each combo uses equity from the
+ * Call-child payload of its dominant betting size.
+ */
+export function equityHandsForDominantSizes(args: {
+  node: NodePayload | null | undefined;
+  /** betActionIndex → acting-seat equity hands at that size's Call child */
+  handsByBetAction: Map<number, EquityHandRow[] | null | undefined>;
+  minBetFreq?: number;
+}): EquityHandRow[] {
+  return equityHandsForSelectedSizes(args);
 }
 
 /**
@@ -432,9 +574,14 @@ export function formatReachMass(reach: number | null | undefined): string {
   return reach.toFixed(2);
 }
 
-function compareNullableNumber(
+/**
+ * Compare finite numbers with `sign`; missing values always sort after finite
+ * ones (both ascending and descending).
+ */
+function compareNullableNumberNullsLast(
   left: number | null | undefined,
   right: number | null | undefined,
+  sign: number,
 ): number {
   const leftOk = left != null && Number.isFinite(left);
   const rightOk = right != null && Number.isFinite(right);
@@ -447,7 +594,7 @@ function compareNullableNumber(
   if (!rightOk) {
     return -1;
   }
-  return (left as number) - (right as number);
+  return sign * ((left as number) - (right as number));
 }
 
 /**
@@ -464,28 +611,30 @@ export function sortValueBluffs(
     let delta = 0;
     switch (key) {
       case "combo":
-        delta = left.combo.localeCompare(right.combo);
+        delta = sign * left.combo.localeCompare(right.combo);
         break;
       case "betFreq":
-        delta = left.betFreq - right.betFreq;
+        delta = sign * (left.betFreq - right.betFreq);
         break;
       case "ev":
-        delta = compareNullableNumber(left.ev, right.ev);
+        delta = compareNullableNumberNullsLast(left.ev, right.ev, sign);
         break;
       case "equity":
-        delta = left.equity - right.equity;
+        delta = sign * (left.equity - right.equity);
         break;
       case "reach":
-        delta = compareNullableNumber(left.reach, right.reach);
+        delta = compareNullableNumberNullsLast(left.reach, right.reach, sign);
         break;
       case "topBetAction":
-        delta = (left.topBetAction ?? "").localeCompare(right.topBetAction ?? "");
+        delta =
+          sign *
+          (left.topBetAction ?? "").localeCompare(right.topBetAction ?? "");
         break;
       default:
         delta = 0;
     }
     if (delta !== 0) {
-      return sign * delta;
+      return delta;
     }
     return left.combo.localeCompare(right.combo);
   });
