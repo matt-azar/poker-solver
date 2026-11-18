@@ -510,4 +510,13 @@ describe("action colors", () => {
     expect(colors.byLabel["Call all-in"]).not.toBe(colors.byLabel["All-in"]);
     expect(colors.byLabel["All-in"]).toBe("#5A0F18");
   });
+
+  it("keeps 75% pot color when a smaller size appears (pot-normalized)", () => {
+    const alone = mapActionColors(["Check", "Bet 75"], { pot: 100 });
+    const withSmaller = mapActionColors(["Check", "Bet 33", "Bet 75"], {
+      pot: 100,
+    });
+    expect(alone.byLabel["Bet 75"]).toBe(withSmaller.byLabel["Bet 75"]);
+    expect(withSmaller.byLabel["Bet 33"]).not.toBe(withSmaller.byLabel["Bet 75"]);
+  });
 });

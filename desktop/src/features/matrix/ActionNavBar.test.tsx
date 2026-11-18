@@ -65,18 +65,18 @@ describe("ActionNavBar", () => {
     cleanup();
   });
 
-  it("renders compact action navigation chips with formatted labels", () => {
+  it("renders readable action navigation chips (Bet N%) above the grid", () => {
     render(<ActionNavBar />);
     const nav = screen.getByRole("group", { name: "Action navigation" });
     expect(nav).toBeTruthy();
     expect(screen.getByRole("button", { name: "Open Check" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Open b36" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Open b62" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open Bet 36%" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open Bet 62%" })).toBeTruthy();
   });
 
   it("calls followAction with the child node id when a chip is clicked", () => {
     render(<ActionNavBar />);
-    fireEvent.click(screen.getByRole("button", { name: "Open b36" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Bet 36%" }));
     expect(followAction).toHaveBeenCalledWith("n-b36");
   });
 
@@ -90,11 +90,11 @@ describe("ActionNavBar", () => {
         .disabled,
     ).toBe(false);
     expect(
-      (screen.getByRole("button", { name: "Open b36" }) as HTMLButtonElement)
+      (screen.getByRole("button", { name: "Open Bet 36%" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
     expect(
-      (screen.getByRole("button", { name: "Open b62" }) as HTMLButtonElement)
+      (screen.getByRole("button", { name: "Open Bet 62%" }) as HTMLButtonElement)
         .disabled,
     ).toBe(false);
   });

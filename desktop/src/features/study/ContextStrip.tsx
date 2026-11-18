@@ -63,6 +63,12 @@ export function ContextStrip() {
   const pot = nodePot(currentNode, rootPot);
   const stack = nodeEffectiveStack(currentNode, rootStack);
   const spr = pot > 0 ? (stack / pot).toFixed(2) : "—";
+  const toCall = Number(currentNode?.to_call ?? 0);
+  const facingCall =
+    currentNode != null &&
+    currentNode.kind !== "chance" &&
+    currentNode.kind !== "terminal" &&
+    toCall > 0;
   const dealNode = currentNode?.kind === "chance";
   const dealing = dealNode ? dealStreetFromBoard(currentNode?.board) : null;
   const toAct = dealNode
@@ -222,29 +228,40 @@ export function ContextStrip() {
       <CardPicker open={pickerOpen} street={pickerStreet} onClose={closePicker} />
       <div className="context-strip__sep" />
       <div className="context-strip__group">
-        <span className="context-strip__label">Pot</span>
-        <span className="context-strip__value">{pot}</span>
+        <span className="context-strip__label">To act</span>
+        <span className="context-strip__value context-strip__value--actor">{toAct}</span>
       </div>
       <div className="context-strip__group">
-        <span className="context-strip__label">Stack / SPR</span>
-        <span className="context-strip__value">
-          {stack} / {spr}
-        </span>
+        <span className="context-strip__label">Pot</span>
+        <span className="context-strip__value tabular">{pot}</span>
       </div>
+      <div className="context-strip__group">
+        <span className="context-strip__label">Stack</span>
+        <span className="context-strip__value tabular">{stack}</span>
+      </div>
+      <div className="context-strip__group">
+        <span className="context-strip__label">SPR</span>
+        <span className="context-strip__value tabular">{spr}</span>
+      </div>
+      {facingCall ? (
+        <div className="context-strip__group">
+          <span className="context-strip__label">To call</span>
+          <span className="context-strip__value tabular">{toCall}</span>
+        </div>
+      ) : null}
       {showRootConfig ? (
-        <div className="context-strip__group" title="Root job pot / starting stack">
-          <span className="context-strip__label">Root</span>
-          <span className="context-strip__value">
+        <div
+          className="context-strip__group"
+          title="Starting pot / effective stack at root"
+        >
+          <span className="context-strip__label">Start</span>
+          <span className="context-strip__value tabular">
             {rootPot} / {rootStack}
           </span>
         </div>
       ) : null}
       <div className="context-strip__sep" />
-      <div className="context-strip__group">
-        <span className="context-strip__label">To act</span>
-        <span className="context-strip__value">{toAct}</span>
-      </div>
-      <div className="context-strip__group">
+      <div className="context-strip__group context-strip__group--line">
         <span className="context-strip__label">Line</span>
         <span className="context-strip__value" title={rawLine}>
           {line}

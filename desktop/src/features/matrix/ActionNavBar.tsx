@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { actionSizePotBasis } from "../../domain/actionHistory";
 import { mapActionColors } from "../../domain/actionColors";
 import {
-  formatActionDisplay,
+  formatActionNavLabel,
   formatActionTooltip,
 } from "../../domain/betSizes";
 import { useSettingsStore } from "../../state/settingsStore";
@@ -27,8 +27,8 @@ export function ActionNavBar() {
   const displayOpts = useMemo(() => ({ toCall }), [toCall]);
 
   const colors = useMemo(
-    () => mapActionColors(actions ?? []),
-    [actions],
+    () => mapActionColors(actions ?? [], { pot, toCall }),
+    [actions, pot, toCall],
   );
 
   if (!actions?.length) {
@@ -38,12 +38,7 @@ export function ActionNavBar() {
   return (
     <div className="action-nav" role="group" aria-label="Action navigation">
       {actions.map((label, index) => {
-        const display = formatActionDisplay(
-          label,
-          pot,
-          betSizeDisplay,
-          displayOpts,
-        );
+        const navLabel = formatActionNavLabel(label, pot, displayOpts);
         const childId = childIdAt(currentNode?.children, index);
         const disabled = !childId;
         return (
@@ -57,7 +52,7 @@ export function ActionNavBar() {
                 ? "No child node"
                 : `Open ${formatActionTooltip(label, pot, betSizeDisplay, displayOpts)}`
             }
-            aria-label={`Open ${display.primary}`}
+            aria-label={`Open ${navLabel}`}
             style={{ ["--action-color" as string]: colors.byIndex[index] }}
             onClick={() => {
               if (childId) {
@@ -66,7 +61,7 @@ export function ActionNavBar() {
             }}
           >
             <span className="action-nav__swatch" aria-hidden />
-            <span className="action-nav__label">{display.primary}</span>
+            <span className="action-nav__label">{navLabel}</span>
           </button>
         );
       })}

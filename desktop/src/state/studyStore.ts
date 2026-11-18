@@ -3200,9 +3200,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     });
     useLayoutStore.getState().setLayout({
       lowerDock: true,
-      lowerDockHeight: Math.max(
-        useLayoutStore.getState().layout.lowerDockHeight,
-        480,
+      lowerDockHeight: Math.min(
+        Math.max(useLayoutStore.getState().layout.lowerDockHeight, 280),
+        typeof window === "undefined"
+          ? 320
+          : Math.floor(window.innerHeight * 0.4),
       ),
     });
 
@@ -3631,11 +3633,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       kind: "values",
     });
     if (cached) {
+      // Never flip matrixMode / overlay from a background values reply.
       set({
         nodeValues: cached,
         phase: phaseFromStatus(get().status, "complete"),
         message: "Action EVs ready.",
-        matrixMode: get().matrixMode === "strategy" ? "strategy-ev" : get().matrixMode,
       });
       return;
     }
@@ -3708,12 +3710,12 @@ export const useStudyStore = create<StudyState>((set, get) => ({
               { solutionId, nodeId, revision, kind: "values" },
               values,
             );
+            // Keep the player's explicit Strategy/Range/EV + Overlay selection.
+            // Background EV must not promote strategy → strategy-ev or touch Overlay.
             set({
               nodeValues: values,
               phase: phaseFromStatus(get().status, "complete"),
               message: "Action EVs ready.",
-              matrixMode:
-                get().matrixMode === "strategy" ? "strategy-ev" : get().matrixMode,
             });
             prefetchChildValues(solutionId, live, revision);
           },

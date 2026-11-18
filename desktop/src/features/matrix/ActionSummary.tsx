@@ -32,8 +32,8 @@ export function ActionSummary() {
   const displayOpts = useMemo(() => ({ toCall }), [toCall]);
 
   const colors = useMemo(
-    () => mapActionColors(actions ?? []),
-    [actions],
+    () => mapActionColors(actions ?? [], { pot, toCall }),
+    [actions, pot, toCall],
   );
 
   const freqs = useMemo(() => {
@@ -91,6 +91,12 @@ export function ActionSummary() {
           <span className="muted action-summary__hint-inline">Filter</span>
         ) : null}
       </div>
+      {(actions?.length ?? 0) > 0 ? (
+        <div className="action-summary__cols" aria-hidden>
+          <span className="action-summary__col-size">Size</span>
+          <span className="action-summary__col-freq">Range freq</span>
+        </div>
+      ) : null}
       <div className="action-summary__blocks">
         {(actions ?? []).map((label, index) => {
           const display = formatActionDisplay(

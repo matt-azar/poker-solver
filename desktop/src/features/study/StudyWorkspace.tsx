@@ -15,6 +15,7 @@ import { LockDrawer } from "../locks/LockDrawer";
 import { ActionNavBar } from "../matrix/ActionNavBar";
 import { HandInspectSheet } from "../matrix/HandInspectSheet";
 import { MatrixDisplayControls } from "../matrix/MatrixDisplayControls";
+import { MatrixFilterChip } from "../matrix/MatrixFilterChip";
 import { OpponentRangePanel } from "../matrix/OpponentRangePanel";
 import { RangeMatrix } from "../matrix/RangeMatrix";
 import { StudyDetailPanel } from "../matrix/StudyDetailPanel";
@@ -83,7 +84,13 @@ function MatrixModeToolbar() {
                     : nodeValues?.error
                       ? String(nodeValues.error)
                       : "Action EVs loading…"
-                  : undefined
+                  : mode.id === "ev"
+                    ? "Show mixed hand EV in chips"
+                    : mode.id === "strategy"
+                      ? "Strategy frequencies"
+                      : mode.id === "range"
+                        ? "Range inclusion"
+                        : undefined
               }
               onClick={() => {
                 setMatrixMode(mode.id);
@@ -95,6 +102,7 @@ function MatrixModeToolbar() {
         })}
       </div>
       <ActionNavBar />
+      <MatrixFilterChip />
       <MatrixDisplayControls />
     </div>
   );
