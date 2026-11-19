@@ -6,7 +6,7 @@ diagnostics zip (auto-included when you use `--diary` / the mini-app diary box).
 | Field | Value |
 | --- | --- |
 | Date (local) | |
-| Build / version | (installer version; `desktop/package.json` is `0.1.7` on current main) |
+| Build / version | (installer version; `desktop/package.json` is `0.1.8` on current main) |
 | OS | Windows |
 | Symptom | crash / hang / freeze / other: |
 
