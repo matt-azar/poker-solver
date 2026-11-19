@@ -52,25 +52,31 @@ function cellKey(row: number, col: number): string {
 }
 
 /**
- * Width ÷ height for the study matrix when the opponent grid is hidden.
- * Dual-range keeps both grids square (ratio 1). Cell type: matrix-density.css.
+ * Legacy single-matrix width÷height from when Hands sat beside the grid in
+ * `matrix-stage`. Cursor-minimal puts Hands in the permanent right rail, so the
+ * single grid fills the stage (see `fillStage` below). Dual-range stays square.
+ * Cell type: matrix-density.css.
  */
 export const SINGLE_MATRIX_WIDTH_OVER_HEIGHT = 1.5;
 
 /**
  * Fit a `widthOverHeight` box into the measured stage.
  * Square (ratio 1): largest square on the shorter side (dual / opponent).
- * Non-square: fill height first so there is no empty vertical gap; width follows
- * the aspect when the stage is wide enough, otherwise uses the full stage width.
+ * `widthOverHeight <= 0`: fill the stage (single-matrix Cursor-minimal layout).
+ * Other ratios: fill height first; width follows the aspect when the stage is
+ * wide enough, otherwise uses the full stage width.
  */
 export function fitAspectSize(
   boxWidth: number,
   boxHeight: number,
   widthOverHeight: number,
 ): { width: number; height: number } {
-  const ratio = widthOverHeight > 0 ? widthOverHeight : 1;
   const bw = Math.max(0, boxWidth);
   const bh = Math.max(0, boxHeight);
+  if (!(widthOverHeight > 0)) {
+    return { width: Math.floor(bw), height: Math.floor(bh) };
+  }
+  const ratio = widthOverHeight;
   if (ratio === 1) {
     const side = Math.floor(Math.min(bw, bh));
     return { width: side, height: side };
@@ -201,21 +207,26 @@ export function RangeMatrix() {
   const lowerDockHeight = useStudyStore((s) => s.layout.lowerDockHeight);
   const setLayout = useStudyStore((s) => s.setLayout);
   const phoneDemo = usePhoneDemoLayout();
+  // Single Study grid fills the left column; CSS grid owns the rail split.
+  // A user width / aspect box would leave the empty gutter Matt circled.
+  const fillStage = !phoneDemo && !dualRange;
   const userWidth =
-    !phoneDemo && typeof matrixWidth === "number" && matrixWidth > 0
+    !fillStage &&
+    !phoneDemo &&
+    typeof matrixWidth === "number" &&
+    matrixWidth > 0
       ? matrixWidth
       : null;
   const stageRef = useRef<HTMLDivElement>(null);
-  // Phone public demo: keep the 13×13 square and full-width.
-  const aspectRatio = phoneDemo
-    ? 1
-    : dualRange
-      ? 1
-      : SINGLE_MATRIX_WIDTH_OVER_HEIGHT;
+  // Phone / dual-range: square. Single: fill stage (ratio 0).
+  const aspectRatio = phoneDemo || dualRange ? 1 : 0;
   const size = useMeasuredAspectSize(stageRef, aspectRatio);
 
   const onResizePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
+    if (fillStage) {
+      return;
+    }
     const wrap = event.currentTarget.parentElement;
     const stage = wrap?.closest(".matrix-stage");
     const startX = event.clientX;
@@ -271,19 +282,36 @@ export function RangeMatrix() {
       ? `Hand range matrix (${RANGE_INCLUSION_MEASURE})`
       : "Hand range matrix";
 
+  const gridSizeStyle: CSSProperties | undefined = fillStage
+    ? { width: "100%", height: "100%" }
+    : userWidth
+      ? { width: "100%", height: "100%" }
+      : size.width > 0
+        ? { width: size.width, height: size.height }
+        : undefined;
+
   return (
     <div
       className="range-matrix-wrap"
+      data-fill-stage={fillStage ? "true" : "false"}
       style={
-        userWidth
+        fillStage
           ? {
-              width: userWidth,
+              width: "100%",
               maxWidth: "100%",
-              flex: "0 0 auto",
+              flex: "1 1 auto",
               aspectRatio: "auto",
               height: "100%",
             }
-          : undefined
+          : userWidth
+            ? {
+                width: userWidth,
+                maxWidth: "100%",
+                flex: "0 0 auto",
+                aspectRatio: "auto",
+                height: "100%",
+              }
+            : undefined
       }
     >
       {valueBluffsHighlight != null &&
@@ -306,13 +334,7 @@ export function RangeMatrix() {
           className="range-matrix matrix-density range-matrix--no-axis"
           role="grid"
           aria-label={matrixAria}
-          style={
-            userWidth
-              ? { width: "100%", height: "100%" }
-              : size.width > 0
-                ? { width: size.width, height: size.height }
-                : undefined
-          }
+          style={gridSizeStyle}
           onMouseLeave={() => setHoverCell(null)}
         >
           {RANKS.map((rowRank, row) => (
@@ -338,7 +360,8 @@ export function RangeMatrix() {
           ))}
         </div>
       </div>
-      {phoneDemo ? null : (
+      {/* Column split is CSS grid (study-columns); no in-matrix width handle. */}
+      {phoneDemo || fillStage ? null : (
         <div
           className="resize-handle resize-handle--vertical range-matrix__resize"
           style={

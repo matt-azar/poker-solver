@@ -1,6 +1,8 @@
 import { create } from "zustand";
 
-const LAYOUT_KEY = "study-layout-v2";
+// v3: drop stale v2 heights/widths that left empty gutters after Cursor-minimal
+// (#489 moved Hands out of matrix-stage; fixed path-nav height became a band).
+const LAYOUT_KEY = "study-layout-v3";
 
 export interface StudyLayout {
   lowerDock: boolean;
@@ -8,7 +10,7 @@ export interface StudyLayout {
   inspectorWidth: number;
   historyHeight: number;
   lowerDockHeight: number;
-  /** User-dragged width of the main 13×13. Null keeps the automatic aspect fit. */
+  /** Dual-range only: user-dragged width of a matrix wrap. Null = auto square. */
   matrixWidth: number | null;
   density: "comfortable" | "compact";
 }
@@ -19,7 +21,8 @@ export const DEFAULT_LAYOUT: StudyLayout = {
   dualRange: false,
   // Permanent right rail targets ~40% width; CSS grid owns the split.
   inspectorWidth: 420,
-  historyHeight: 48,
+  // Max cap for content-sized path-nav (not a forced empty height).
+  historyHeight: 72,
   lowerDockHeight: 200,
   matrixWidth: null,
   density: "comfortable",
@@ -38,9 +41,10 @@ function dockMaxPx(): number {
 
 function historyMaxPx(): number {
   if (typeof window === "undefined") {
-    return 280;
+    return 120;
   }
-  return Math.max(96, Math.floor(window.innerHeight * 0.35));
+  // Cursor-minimal green strip stays short; never reserve 35% of the window.
+  return Math.min(120, Math.max(72, Math.floor(window.innerHeight * 0.14)));
 }
 
 export function clampDockHeight(height: number): number {
