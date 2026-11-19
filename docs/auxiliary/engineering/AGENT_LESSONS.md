@@ -241,7 +241,9 @@ At a flop root, `t-1.r-1` is both the node id and the line key — **do not infe
 - Work limits: never silently sample when over the pair-runout ceiling. Study packaging ceilings and calculator defaults differ; keep host constants aligned with what Tauri/Study expect.
 - Warm the **current** decision (queue + identity-keyed cache). Do **not** full-tree frontload EV/equity into the save (#184, #190, #191).
 
-User-facing Study copy says **Equity** (not “Check-down equity”); the quantity is still check-down pot fraction, not chip EV (#189).
+User-facing Study copy says **Equity** (not “Check-down equity”); the quantity is still check-down pot fraction, not chip EV (#189). The dock tab label is **Equity**.
+
+Study chrome is dark-only. Do not restore a light or system theme toggle. A stored light or system preference is dropped on read. The Study page is node navigation above the matrix and a permanent right rail (Actions and the combo inspector). Solve, Continue, Pause, and Stop are in the status bar. Visible metrics are Iter, EV, and Acc. Time, ETA, Rate, Job, and Mem are under More. Help lists `S`, `X`, `C`, and `?`. There is no board shortcut. Value / Bluffs size toggles keep a combo at the selected size's frequency. After call uses the Call child of the highest-frequency enabled size (#463, #489, #490).
 
 Hands / Eq overlay: wire acting-seat equity (not an empty `Map`); look up via normalized `comboKey` (suit-order variants); gate ready/pending with solution+node id so navigate does not show another node’s Eq (#170). Node inspect must fill strategy-conditioned `reach` / `marginal` or the matrix treats every cell as undefined (#292).
 
@@ -253,7 +255,7 @@ Hands / Eq overlay: wire acting-seat equity (not an empty `Map`); look up via no
 ### Solve progress / Accuracy stop
 
 - Progress: iteration counter every train step; EV / gap / Accuracy refresh about every 10 iters (or denser if Samples is raised) (#180). `time_limit: 0` stops after the first completed iteration.
-- Early-stop uses **Pio Accuracy** (`NashConv / 2`). Compare the threshold to **Accuracy chips**, not raw NashConv (off-by-2 early/late stop). Default CLI/UI **unit** is pot fraction (`--accuracy 0.05` or `5 chips`); Pio UPI’s chips-default unit is not our product default (#179). Keep `nash_gap` as NashConv for reporting.
+- Early-stop uses **Pio Accuracy** (`NashConv / 2`). Compare the threshold to **Accuracy chips**, not raw NashConv (off-by-2 early/late stop). Host `solve` and `gate-bench --accuracy` use a pot fraction (`0.005` = 0.5% of pot). `gate-bench` can take `chips` instead. The Build Accuracy field is percent of pot (`0.5` in the field = engine fraction `0.005`). Do not send the percent number as the engine fraction. Pio UPI’s chips-default unit is not our product default (#179). Keep `nash_gap` as NashConv for reporting.
 - **Acc-stop honesty (ZR-153):** `CompiledGame.pot` is **tenths**. Threshold chips = `accuracy_pot_fraction * tenthsToChips(pot)` — never multiply the fraction by raw tenths (10× threshold → false early “Accuracy reached”). After `train(1)`, publish cadence may leave a **stale** average; Study `trainGated` and gate-bench Acc checkpoints must `ensurePublishedExact()` so the evaluated average matches the reported iteration.
 
 ---
