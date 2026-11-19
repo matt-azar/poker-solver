@@ -7,7 +7,7 @@ React study client (`desktop/`) over the Zig `solver-engine` typed-IPC host. Doc
 | Choice | Decision |
 | --- | --- |
 | Web client | React 19 + TypeScript + Vite |
-| State | Zustand for study/layout/theme; query identity in the engine client |
+| State | Zustand for study and layout. Chrome is dark-only. Query identity lives in the engine client. |
 | Engine transport | Zig `solver-engine` typed IPC (protocol 2, inherited pipes via Tauri). |
 | Desktop shell | Tauri 2 + `solver-engine` IPC sidecar |
 | Static UI | Vite `dist` loaded by the Tauri webview |
@@ -26,6 +26,12 @@ cd desktop && npm ci && npm run tauri dev
 
 Browser-only `npm run dev` does not start an engine.
 
+## Study layout
+
+The Study page has three regions. Node navigation (board, betting line, action history) sits above the range matrix. A permanent right rail shows Actions and the combo inspector. The lower dock holds Compare runouts, Equity, Categories, and Value / Bluffs.
+
+Solve, Continue, Pause, and Stop are in the status bar. The bar shows Iter, EV, and Acc. More shows Time, ETA, Rate, Job, and Mem. Chrome is dark-only. Help (`?`) lists Solve (`S`), Stop (`X`), Continue (`C`), and Help.
+
 ## Other entries
 
 | Entry | How to open it |
@@ -40,17 +46,17 @@ IPC ops are protocol-2 host methods on `solver-engine` (`desktop/src/engine/tran
 
 | Backend operation | IPC op(s) | Study UI destination | Limitations | Tests |
 | --- | --- | --- | --- | --- |
-| Status | `status` | Status bar + solve strip (`gap_series` retained in payload) | Metrics null when unset; Iter n/x every iteration; EV/gap at least every 10 iters | `status.test.ts`; contract smoke |
+| Status | `status` | Status bar (`gap_series` retained in payload) | Visible: Iter, EV, Acc. More: Time, ETA, Rate, Job, Mem. Null when unset. Iter every iteration. EV and gap at least every 10 iterations | `status.test.ts`; contract smoke |
 | Solve | `begin_config` + `solve` | Build workspace + Solve | Reject if already running; empty≠absent bets; short-admit `{accepted,running}` | `client.test.ts`; contract smoke |
-| Pause / Stop | `pause`, `cancel` | Solve controls | Chunk boundary before publish; Study stop → host cancel | client + store lifecycle tests |
-| Continue | `solve` on open session (no `begin_config`) | Solve controls | Same solution id; browse-only checkpoints disable Continue | store lifecycle; ZR-115 |
-| Browse node | `node` | Action history + matrix + combo inspector | One node at a time; root from `root_node_id` | browse vitest; contract smoke |
+| Pause / Stop | `pause`, `cancel` | Status bar | Chunk boundary before publish; Study stop → host cancel | client + store lifecycle tests |
+| Continue | `solve` on open session (no `begin_config`) | Status bar | Same solution id; browse-only checkpoints disable Continue | store lifecycle; ZR-115 |
+| Browse node | `node` | Node nav, matrix, right rail (Actions + combo inspector) | One node at a time; root from `root_node_id` | browse vitest; contract smoke |
 | Action EV | `values` | Inspector / Analysis | Decision only; mid-train demux by `request_id` | analysis vitest; node-EV scripts |
 | Runouts | *(soft-gated)* | Study has no Runouts tab | Host `runouts` not enabled in `ipcCapabilities` | — |
 | Next-card picker | chance `cards[]` on `node` | Board buttons → rank×suit picker; line-preserving turn/river via deal-chance ancestor | Rewrites current `pN.t/r` from chance child runout; flop edits and earlier-street swaps after a later card is dealt are unsupported; board blockers marked | `cards.test.ts`; CardPicker |
 | Equity (node) | `equity` | Study Equity tab: averages, clickable band filter, OOP vs IP chart, top hands; **Open in Equity** copies reach weights | Check-down (not chip EV); reach-weighted at selected node; buckets + `oop_hands`/`ip_hands`. There is no Runouts tab | analysis vitest; contract smoke |
 | Equity calculator | `start_equity_job` / `get_equity_job` / `cancel_equity_job` | Equity workspace (2–6 players, Auto/Exact/MC, dead cards, persistence) | No solution required; per-hand/next-card analysis not mounted | `equityStore` / client vitest; `scripts/zig/equity-calculator-smoke.py` (Study node equity uses `equity-smoke.py`) |
-| Value / Bluffs | Client join of node `strategy` + `equity` + `values` | Study **Value / Bluffs** tab | After call = equity on Call child of each hand’s max-prob bet/raise; EV via `values` (`comboEv`); Reach is node reach mass | `valueBluffs.test.ts` |
+| Value / Bluffs | Client join of node `strategy` + `equity` + `values` | Study **Value / Bluffs** tab | Size toggles keep combos with frequency on the enabled sizes and show that frequency. After call uses equity on the Call child of the highest-frequency enabled size. The table shows 50 rows and can load more. EV comes from `values` (`comboEv`). Reach is node reach mass | `valueBluffs.test.ts` |
 | Categories | `categories` | Categories tab with OOP/IP seat toggle; draws on flop/turn | River made-hand; flop/turn multi-label draws | analysis vitest (ZR-103) |
 | Locks | `list_locks` / `put_lock` / `delete_lock` (`scope` node\|line) | Node Locking workspace (Tree → Node locking…) | Default scope is this board; line lock is explicit; all-zero PUT rejected; 0%≠unlock | `locks.test.ts` |
 | Strategy edits | `list_strategy_edits` / `put_strategy_edit` / `delete_strategy_edit` | Strategy editor drawer (separate from locks) | Session-only overlays; sum≈1; clear restores CFR average | `strategyEdits.test.ts` (ZR-101) |
@@ -65,7 +71,7 @@ IPC ops are protocol-2 host methods on `solver-engine` (`desktop/src/engine/tran
 | Betting tree Save / Open | Client JSON (`holdem-study-betting-tree` v1) in localStorage | Build → Betting tree catalogue | Sizes, caps, `tree_edits` only; flat list (no folders) | `bettingTreeCatalogue` |
 | Solutions catalogue | PSOL paths + folder index (`holdem-study-solutions`) | Study Save/Open + Library recent | User folders (multi-level); managed root via Tauri `solutions_*`; no OS picker as primary | `solutionsCatalogue` |
 | Compare runouts | Host `line_card_report` (fallback: multi-`getNode`) | Study dock + context-strip | Prefer fat Zig report; legacy multi-getNode kept | `lineCardReport` + LowerDock |
-| Value/Bluffs after-call | Host `value_bluffs_post_call` (fallback: bet→Call equity walk) | Value/Bluffs Mode B | Prefer fat Zig join | `valueBluffsPostCall` |
+| Value/Bluffs after-call | Host `value_bluffs_post_call` (fallback: bet→Call equity walk) | Value/Bluffs **After call** | Host `hands_by_action` joins each size's Call child. The panel uses the highest-frequency enabled size | `valueBluffsPostCall` |
 | Create Build spot from here | Client draft from node + `get_config` | Context strip → Build draft | Midstreet (facing bet / contrib) not supported; asymmetric stacks use `min` | `build/transferFromStudy` |
 | Study assistant (AI) | Client-side unified chat + bounded Study evidence tools | Floating Study assistant (menu bar **Assistant**) | OpenAI credentials required in product UI; no autonomous solve / filesystem; pot type required; silent rake → cEV, silent stack → 100bb | assistant domain vitest — see [STUDY_SETUP_ASSISTANT.md](STUDY_SETUP_ASSISTANT.md), [ai-context](ai-context/README.md) |
 | Algorithm | Host always trains CFR+ (`trainFrozenCfrPlus`) | Settings shows a read-only CFR+ field | Opening Settings sets the draft algorithm to `cfr_plus`. PSOL v4 stores the CFR+ byte only. Train threads from config are capped by `WorkerBudget` (n−2 on 4+ CPUs) | `formats/src/psol_v4.zig`; `host/src/workers.zig` |
@@ -87,7 +93,7 @@ IPC ops are protocol-2 host methods on `solver-engine` (`desktop/src/engine/tran
 | Slice | State |
 | --- | --- |
 | Contracts + `EngineClient` | Done |
-| Study workspace (layout, matrix, inspector, solve controls, board picker) | Done |
+| Study workspace (node nav, matrix, right rail, lower dock, board picker) | Done |
 | Analysis dock + Build + Library | Done — Equity hist + band filter + OOP vs IP chart; Categories made-hand/draws; Value / Bluffs Mode A/B (node vs after-call equity; &lt;/&gt; threshold); Library nested range folders |
 | Locks + strategy edits | Done |
 | Compare | Done — host `compare` + Session baseline snapshot on resolve-locked; `compare: true` in `ipcCapabilities` |
@@ -155,7 +161,7 @@ npm run tauri:build
 - Typecheck: `cd desktop && npx tsc -b`
 - Build: `cd desktop && npm run build`
 - Engine: `zig build test` (+ `scripts/zig/ready-smoke.py`, `scripts/zig/study-contract-smoke.py`)
-- Live: solve via Tauri + `solver-engine` IPC; Status bar shows EV / NashConv / mem (`gap_series` in status payload, no Graphs UI)
-- Visual targets: 1440×900 dark/light, 1920×1080 dual-range, 1280×800 compact
+- Live: solve via Tauri + `solver-engine` IPC. The status bar shows Iter, EV, and Acc. More shows Time, ETA, Rate, Job, and Mem. `gap_series` stays in the status payload. There is no Graphs view.
+- Visual targets: 1440×900 dark, 1920×1080 dual-range, 1280×800 compact
 - Re-validate Tauri webview lifecycle, native Open/Save dialogs, and the NSIS packaged install on Windows before a Study release. Full guide: [TESTING.md](auxiliary/engineering/TESTING.md).
 - Changing the flop, and changing an earlier street after a later card is dealt, are unsupported. Turn and river card changes keep the betting line when the deal-chance ancestor is known. See [EQUITY.md](EQUITY.md) for check-down equity limits.
