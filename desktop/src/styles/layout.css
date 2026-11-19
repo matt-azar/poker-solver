@@ -518,11 +518,6 @@
 .toolbar-btn.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
-}
-
-/* Styles for .primary. */
-[data-theme="dark"] .toolbar-btn.primary {
   color: #12151a;
 }
 

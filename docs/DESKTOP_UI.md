@@ -92,7 +92,7 @@ IPC ops are protocol-2 host methods on `solver-engine` (`desktop/src/engine/tran
 | Locks + strategy edits | Done |
 | Compare | Done — host `compare` + Session baseline snapshot on resolve-locked; `compare: true` in `ipcCapabilities` |
 | Desktop packaging (Tauri + NSIS) | Done — unsigned CI artifact; see [Desktop packaging](#desktop-packaging) |
-| Visual / a11y / perf polish | Partial — focus-visible, reduced-motion, compact ≤1280, light/dark themes |
+| Visual / a11y / perf polish | Partial — focus-visible, reduced-motion, compact ≤1280, dark-only chrome |
 
 ## Desktop packaging
 

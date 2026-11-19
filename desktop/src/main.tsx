@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./styles/tokens.css";
 import "./styles/layout.css";
-import { applyDocumentTheme, resolveTheme, useThemeStore } from "./state/themeStore";
+import { applyDocumentTheme } from "./state/themeStore";
 import { detectAndInstallPlatform } from "./platform";
 import { startUiHangMonitor } from "./platform/diagnostics";
 import { ensureEngine } from "./platform/engine";
@@ -11,7 +11,7 @@ import { maybeRunIpcAcceptanceAndExit } from "./platform/ipcAcceptance";
 import { maybeRunInstallerE2eAndExit } from "./platform/installerE2e";
 import { useStudyStore } from "./state/studyStore";
 
-applyDocumentTheme(resolveTheme(useThemeStore.getState().preference));
+applyDocumentTheme("dark");
 detectAndInstallPlatform();
 // ZR-173: cheap main-thread stall → ui-hang-events.json (Tauri only).
 startUiHangMonitor();

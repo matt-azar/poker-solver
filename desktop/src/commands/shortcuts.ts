@@ -3,7 +3,6 @@ export type ShortcutAction =
   | "stop"
   | "continue"
   | "help"
-  | "theme"
   | "save"
   | "open"
   | "escape";

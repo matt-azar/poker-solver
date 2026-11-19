@@ -182,7 +182,6 @@ function rejectUnavailableIpcFeature(feature: StudyIpcFeature): string | null {
   }
   return studyIpcUnavailableReason(feature);
 }
-import { useThemeStore } from "./themeStore";
 import { useLayoutStore } from "./layoutStore";
 import {
   analysisErrorIsPermanent,
@@ -507,11 +506,7 @@ interface StudyState {
   clearStrategyEditNode: () => Promise<void>;
   clearAllStrategyEdits: () => Promise<void>;
 
-  // theme/layout proxies for UI convenience
-  theme: "light" | "dark";
-  themePreference: string;
-  setThemePreference: (value: "system" | "light" | "dark") => void;
-  toggleTheme: () => void;
+  // layout proxies for UI convenience
   layout: ReturnType<typeof useLayoutStore.getState>["layout"];
   setLayout: (partial: Partial<ReturnType<typeof useLayoutStore.getState>["layout"]>) => void;
   resetLayout: () => void;
@@ -977,21 +972,6 @@ function prefetchChildValues(
     });
   }
 }
-
-function syncThemeProxy(set: (partial: Partial<StudyState>) => void) {
-  const theme = useThemeStore.getState();
-  set({
-    theme: theme.theme,
-    themePreference: theme.preference,
-  });
-}
-
-useThemeStore.subscribe((state) => {
-  useStudyStore.setState({
-    theme: state.theme,
-    themePreference: state.preference,
-  });
-});
 
 useLayoutStore.subscribe((state) => {
   useStudyStore.setState({ layout: state.layout });
@@ -2391,16 +2371,6 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     }
   },
 
-  theme: useThemeStore.getState().theme,
-  themePreference: useThemeStore.getState().preference,
-  setThemePreference(value) {
-    useThemeStore.getState().setPreference(value);
-    syncThemeProxy(set);
-  },
-  toggleTheme() {
-    useThemeStore.getState().toggleTheme();
-    syncThemeProxy(set);
-  },
   layout: useLayoutStore.getState().layout,
   setLayout(partial) {
     useLayoutStore.getState().setLayout(partial);
