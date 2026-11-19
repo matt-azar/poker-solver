@@ -7,14 +7,17 @@
  *   .path-nav__step / .path-nav__btn  → step + control button type size
  */
 
-/* Resizable path / action-history strip under the Study context strip. */
+/* Path / action-history strip under the Study context strip.
+   Height hugs content; inline maxHeight (historyHeight) caps growth — never
+   force a tall empty band between PATH and the Strategy toolbar. */
 .path-nav {
   position: relative;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   background: var(--panel);
   border-bottom: 0;
-  min-height: 40px;
-  max-height: 28%;
+  min-height: 0;
+  max-height: none;
+  height: auto;
   overflow: auto;
   display: flex;
   flex-direction: column;
@@ -24,6 +27,7 @@
 
 .study-node-nav .path-nav {
   border-bottom: 0;
+  flex: 0 0 auto;
 }
 
 .path-nav[data-empty="true"] {

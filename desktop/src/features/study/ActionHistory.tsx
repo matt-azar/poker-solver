@@ -162,8 +162,8 @@ export function ActionHistory() {
         }
         const maxHistory =
           typeof window === "undefined"
-            ? 280
-            : Math.max(96, Math.floor(window.innerHeight * 0.35));
+            ? 120
+            : Math.min(120, Math.max(72, Math.floor(window.innerHeight * 0.14)));
         const next = Math.min(
           maxHistory,
           Math.max(40, dragRef.current.startH + (ev.clientY - dragRef.current.startY)),
@@ -332,7 +332,10 @@ export function ActionHistory() {
       style={
         currentNode
           ? {
-              height: layout.historyHeight,
+              // Content-sized strip; historyHeight is only a max cap. A fixed
+              // height left a tall empty band under PATH (Windows Study gaps).
+              maxHeight: layout.historyHeight,
+              height: "auto",
             }
           : undefined
       }

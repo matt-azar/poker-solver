@@ -66,6 +66,10 @@ describe("fitAspectSize", () => {
     expect(fitAspectSize(420, 380, 1)).toEqual({ width: 380, height: 380 });
   });
 
+  it("fills the stage when ratio is 0 (single-matrix Cursor-minimal)", () => {
+    expect(fitAspectSize(900, 400, 0)).toEqual({ width: 900, height: 400 });
+  });
+
   it("fills full height in a taller box when width is the constraint", () => {
     expect(fitAspectSize(300, 400, SINGLE_MATRIX_WIDTH_OVER_HEIGHT)).toEqual({
       width: 300,
@@ -91,55 +95,52 @@ describe("fitAspectSize", () => {
 describe("RangeMatrix single-layout size", () => {
   afterEach(() => {
     cleanup();
-    useStudyStore.setState({
-      layout: {
-        ...useStudyStore.getState().layout,
-        dualRange: false,
-        matrixWidth: null,
-      },
-    });
+    useStudyStore.getState().setLayout({ dualRange: false, matrixWidth: null });
   });
 
-  it("draws the main grid 1.5× as wide as it is tall when the stage is wide enough", () => {
-    useStudyStore.setState({
-      layout: { ...useStudyStore.getState().layout, dualRange: false },
-      currentNode: null,
-    });
+  it("fills the stage width and height when the opponent grid is hidden", () => {
+    useStudyStore.getState().setLayout({ dualRange: false });
+    useStudyStore.setState({ currentNode: null });
     const restore = stubStageBox(900, 400);
     try {
       render(<RangeMatrix />);
+      const wrap = document.querySelector(".range-matrix-wrap") as HTMLElement;
+      expect(wrap.getAttribute("data-fill-stage")).toBe("true");
+      expect(wrap.style.width).toBe("100%");
       const grid = screen.getByRole("grid", { name: /Hand range matrix/ });
-      expect(grid.style.width).toBe("600px");
-      expect(grid.style.height).toBe("400px");
+      expect(grid.style.width).toBe("100%");
+      expect(grid.style.height).toBe("100%");
+      expect(
+        screen.queryByRole("separator", { name: "Resize range matrix" }),
+      ).toBeNull();
     } finally {
       restore();
     }
   });
 
-  it("uses the full stage height when the opponent grid is hidden", () => {
-    useStudyStore.setState({
-      layout: { ...useStudyStore.getState().layout, dualRange: false },
-      currentNode: null,
-    });
+  it("still fills a tall narrow stage instead of leaving a side gutter", () => {
+    useStudyStore.getState().setLayout({ dualRange: false });
+    useStudyStore.setState({ currentNode: null });
     const restore = stubStageBox(320, 480);
     try {
       render(<RangeMatrix />);
       const grid = screen.getByRole("grid", { name: /Hand range matrix/ });
-      expect(grid.style.height).toBe("480px");
-      expect(grid.style.width).toBe("320px");
+      expect(grid.style.width).toBe("100%");
+      expect(grid.style.height).toBe("100%");
     } finally {
       restore();
     }
   });
 
   it("keeps the main grid square while the opponent grid is shown", () => {
-    useStudyStore.setState({
-      layout: { ...useStudyStore.getState().layout, dualRange: true },
-      currentNode: null,
-    });
+    // setLayout keeps layoutStore + studyStore in sync (setState alone does not).
+    useStudyStore.getState().setLayout({ dualRange: true, matrixWidth: null });
+    useStudyStore.setState({ currentNode: null });
     const restore = stubStageBox(900, 400);
     try {
       render(<RangeMatrix />);
+      const wrap = document.querySelector(".range-matrix-wrap") as HTMLElement;
+      expect(wrap.getAttribute("data-fill-stage")).toBe("false");
       const grid = screen.getByRole("grid", { name: /Hand range matrix/ });
       expect(grid.style.width).toBe("400px");
       expect(grid.style.height).toBe("400px");
@@ -149,23 +150,21 @@ describe("RangeMatrix single-layout size", () => {
   });
 
   it("drops the A–2 axis labels and still shows ranks inside cells", () => {
-    useStudyStore.setState({
-      layout: { ...useStudyStore.getState().layout, dualRange: false, matrixWidth: null },
-      currentNode: null,
-    });
+    useStudyStore.getState().setLayout({ dualRange: false, matrixWidth: null });
+    useStudyStore.setState({ currentNode: null });
     render(<RangeMatrix />);
     expect(document.querySelectorAll(".range-matrix .matrix-axis")).toHaveLength(0);
     expect(document.querySelector(".matrix-corner")).toBeNull();
     expect(screen.getByText("AA")).toBeTruthy();
     expect(screen.getByText("AKs")).toBeTruthy();
-    expect(screen.getByRole("separator", { name: "Resize range matrix" })).toBeTruthy();
+    expect(
+      screen.queryByRole("separator", { name: "Resize range matrix" }),
+    ).toBeNull();
   });
 
-  it("resizes the main grid when the handle is dragged", () => {
-    useStudyStore.setState({
-      layout: { ...useStudyStore.getState().layout, dualRange: false, matrixWidth: null },
-      currentNode: null,
-    });
+  it("resizes a dual-range matrix when the handle is dragged", () => {
+    useStudyStore.getState().setLayout({ dualRange: true, matrixWidth: null });
+    useStudyStore.setState({ currentNode: null });
     render(<RangeMatrix />);
     const handle = screen.getByRole("separator", { name: "Resize range matrix" });
     fireEvent.pointerDown(handle, { clientX: 0, pointerId: 1 });
@@ -179,31 +178,26 @@ describe("RangeMatrix single-layout size", () => {
     expect(grid.style.height).toBe("100%");
   });
 
-  it("stops the column split at the top of the open analysis dock", () => {
-    useStudyStore.setState({
-      layout: {
-        ...useStudyStore.getState().layout,
-        dualRange: false,
-        lowerDock: true,
-        lowerDockHeight: 240,
-      },
+  it("stops the dual-range column split at the top of the open analysis dock", () => {
+    useStudyStore.getState().setLayout({
+      dualRange: true,
+      lowerDock: true,
+      lowerDockHeight: 240,
     });
     render(<RangeMatrix />);
     const handle = screen.getByRole("separator", { name: "Resize range matrix" });
     expect(handle.style.bottom).toBe(`${clampDockHeight(240)}px`);
   });
 
-  it("lets the column split fill the upper pane when the dock is closed", () => {
-    useStudyStore.setState({
-      layout: {
-        ...useStudyStore.getState().layout,
-        dualRange: false,
-        lowerDock: false,
-        lowerDockHeight: 240,
-      },
+  it("hides the single-matrix width handle when the dock is closed", () => {
+    useStudyStore.getState().setLayout({
+      dualRange: false,
+      lowerDock: false,
+      lowerDockHeight: 240,
     });
     render(<RangeMatrix />);
-    const handle = screen.getByRole("separator", { name: "Resize range matrix" });
-    expect(handle.style.bottom).toBe("");
+    expect(
+      screen.queryByRole("separator", { name: "Resize range matrix" }),
+    ).toBeNull();
   });
 });
