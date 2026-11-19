@@ -21,7 +21,7 @@ States: `unverified`, `missing`, `partial`, `verified`, `not applicable`.
 | Reports, scripting, batch queue | partial | M9 | Study Compare runouts (client orchestration); Create Build spot from street-start decisions; `holdem-study-cli` (`plan`, `solve`, `from-hh`) plus `street-config-check` and `gate-bench` | No durable batch queue; midstreet Build extraction still needs initial betting state; host `runouts` op still soft-gated |
 | Trainer, packs, session statistics | missing | M11 | Versioned `hand-history 1` schema. `holdem-study-cli from-hh` turns a five-card document into a study job (#428). | No packs, drills, or self-play sampler yet |
 | Preflop solver and chart editor | missing | M12 | — | Deferred |
-| Layouts, shortcuts, themes, localization | partial | M13 | React Study light/dark themes + shortcuts in `desktop/` | No saved layouts. Localization is absent. |
+| Layouts, shortcuts, themes, localization | partial | M13 | React Study dark-only chrome + shortcuts in `desktop/` | No saved layouts. Localization is absent. No light/system theme toggle. |
 | Delivery, install, upgrade, recovery | partial | M13 | `zig build` + `zig.yml`; desktop `ci.yml`; unsigned Windows NSIS via `windows-installer.yml` shipping Zig `solver-engine` only; current published cut is [v0.1.7-windows](https://github.com/matt-azar/poker-solver/releases/tag/v0.1.7-windows) ([DESKTOP_UI.md](../../DESKTOP_UI.md)) | Not code-signed; no upgrade/migration package story yet. Tech-preview / dual-sidecar installer channel removed (#287). |
 
 Update a row only with the commit that demonstrates it. Historical phase 1–10 notes stay in [ROADMAP.md](ROADMAP.md).

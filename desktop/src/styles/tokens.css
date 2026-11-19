@@ -9,50 +9,27 @@
  *   path-nav.css        Action-history / path crumbs
  *   opponent-range.css  Dual-range opponent pane geometry
  *
- * Theme is toggled via [data-theme="light"|"dark"] on the document.
+ * Chrome is dark-only. data-theme="dark" / .theme-dark stay for compatibility.
  */
 
 :root,
-[data-theme="light"] {
-  /* Surfaces */
-  --app-bg: #eceff2; /* Window background behind panels */
-  --panel: #ffffff; /* Primary panel fill (matrix, docks, dialogs) */
-  --secondary: #f4f6f8; /* Toolbars, headers, chip backgrounds */
-  --border: #ccd3db;
-  /* Type */
-  --text: #1c2530;
-  --muted: #536170; /* Secondary labels / frequencies */
-  /* Brand + status */
-  --accent: #285f99;
-  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
-  --danger: #a33b32;
-  --ok: #2f7a52;
-  /* Four-color deck: hearts red, diamonds blue, clubs green, spades dark.
-     Every suit-tinted surface (board, path, picker, PlayingCard) must use
-     these tokens — never group hearts+diamonds as one "red". */
-  --suit-heart: #a33b32;
-  --suit-diamond: #1f5fbf;
-  --suit-club: #2f7a52;
-  --suit-spade: #1c2530;
-  --hover-outline: #8a97a8;
-  --selection-outline: #285f99;
-  --empty-cell: #e4e8ed; /* Empty / excluded matrix + Hands tile fill */
-  --matrix-label: #6a7684; /* Rank axis labels on the 13×13 */
-  --shadow-soft: 0 1px 0 color-mix(in srgb, var(--border) 70%, transparent);
-  color-scheme: light;
-}
-
 [data-theme="dark"] {
+  /* Surfaces */
   --app-bg: #15181d;
   --panel: #1c2026;
   --secondary: #242a32;
   --border: #343d48;
+  /* Type */
   --text: #e7ecf2;
   --muted: #a8b3c1;
+  /* Brand + status */
   --accent: #7fa8d1;
   --accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);
   --danger: #d07168;
   --ok: #6fb08a;
+  /* Four-color deck: hearts red, diamonds blue, clubs green, spades light.
+     Every suit-tinted surface (board, path, picker, PlayingCard) must use
+     these tokens — never group hearts+diamonds as one "red". */
   --suit-heart: #d07168;
   --suit-diamond: #7fa8d1;
   --suit-club: #6fb08a;
@@ -63,9 +40,6 @@
   --matrix-label: #8a96a6;
   --shadow-soft: 0 1px 0 color-mix(in srgb, #000 35%, transparent);
   color-scheme: dark;
-}
-
-:root {
   /* Typography */
   --font-sans: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue",
     sans-serif;

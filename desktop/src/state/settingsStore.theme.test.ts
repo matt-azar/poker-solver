@@ -16,41 +16,34 @@ Object.defineProperty(window, "matchMedia", {
   }),
 });
 
-const { THEME_STORAGE_KEY, useThemeStore } = await import("./themeStore");
-const { useSettingsStore } = await import("./settingsStore");
+const { useSettingsStore, DEFAULT_UI_SETTINGS } = await import("./settingsStore");
 
-describe("settingsStore theme mirror (R15)", () => {
+describe("settingsStore (no theme preference)", () => {
   beforeEach(() => {
     localStorage.clear();
-    useThemeStore.getState().setPreference("system");
     useSettingsStore.setState({
-      settings: {
-        ...useSettingsStore.getState().settings,
-        themePreference: "system",
-      },
+      settings: { ...DEFAULT_UI_SETTINGS },
+      settingsOpen: false,
     });
   });
 
-  it("updateSettings themePreference writes themeStore and survives reload key", () => {
-    useSettingsStore.getState().updateSettings({ themePreference: "dark" });
-    expect(useThemeStore.getState().preference).toBe("dark");
-    expect(useSettingsStore.getState().settings.themePreference).toBe("dark");
-    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("dark");
-    // Non-theme settings blob must not be the theme authority.
+  it("persists display settings without themePreference", () => {
+    useSettingsStore.getState().updateSettings({ evDisplayBasis: "root_centered" });
+    expect(useSettingsStore.getState().settings.evDisplayBasis).toBe("root_centered");
     const raw = localStorage.getItem("study-ui-settings-v1");
     expect(raw).toBeTruthy();
-    expect(JSON.parse(raw!).themePreference).toBeUndefined();
+    const parsed = JSON.parse(raw!);
+    expect(parsed.themePreference).toBeUndefined();
+    expect(parsed.evDisplayBasis).toBe("root_centered");
+    expect(Object.keys(useSettingsStore.getState().settings)).not.toContain("themePreference");
   });
 
-  it("Theme button (themeStore) keeps Settings select in sync", () => {
-    useThemeStore.getState().setPreference("light");
-    expect(useSettingsStore.getState().settings.themePreference).toBe("light");
-  });
-
-  it("resetSettings restores system via themeStore", () => {
-    useThemeStore.getState().setPreference("dark");
+  it("resetSettings restores display defaults only", () => {
+    useSettingsStore.getState().updateSettings({
+      evDisplayBasis: "root_centered",
+      betSizeDisplay: "chips",
+    });
     useSettingsStore.getState().resetSettings();
-    expect(useThemeStore.getState().preference).toBe("system");
-    expect(useSettingsStore.getState().settings.themePreference).toBe("system");
+    expect(useSettingsStore.getState().settings).toEqual(DEFAULT_UI_SETTINGS);
   });
 });

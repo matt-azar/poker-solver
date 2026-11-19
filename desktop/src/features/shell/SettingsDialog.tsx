@@ -4,7 +4,6 @@ import {
   fastSolveDefaults,
   formatHardwareHint,
 } from "../../domain/hardwareDefaults";
-import type { ThemePreference } from "../../domain/types";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useStudyStore } from "../../state/studyStore";
 
@@ -29,7 +28,6 @@ export function SettingsDialog() {
   const settings = useSettingsStore((s) => s.settings);
   const updateSettings = useSettingsStore((s) => s.updateSettings);
   const resetSettings = useSettingsStore((s) => s.resetSettings);
-  const setThemePreference = useStudyStore((s) => s.setThemePreference);
   const setEvDisplayBasis = useStudyStore((s) => s.setEvDisplayBasis);
   const evDisplayBasis = useStudyStore((s) => s.evDisplayBasis);
   const draft = useStudyStore((s) => s.draft);
@@ -45,7 +43,6 @@ export function SettingsDialog() {
     }
     // Align study store when Settings opens / values change from this dialog.
     setEvDisplayBasis(settings.evDisplayBasis);
-    setThemePreference(settings.themePreference);
     // Engine ships CFR+ only — drop draft Vanilla/DCFR labels if present.
     if (draft.algorithm !== "cfr_plus") {
       updateDraft({ algorithm: "cfr_plus" });
@@ -53,9 +50,7 @@ export function SettingsDialog() {
   }, [
     open,
     settings.evDisplayBasis,
-    settings.themePreference,
     setEvDisplayBasis,
-    setThemePreference,
     draft.algorithm,
     updateDraft,
   ]);
@@ -140,22 +135,6 @@ export function SettingsDialog() {
             Close
           </button>
         </div>
-
-        <label className="settings-field">
-          Theme
-          <select
-            value={settings.themePreference}
-            onChange={(event) => {
-              const value = event.target.value as ThemePreference;
-              updateSettings({ themePreference: value });
-              setThemePreference(value);
-            }}
-          >
-            <option value="system">System</option>
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
-          </select>
-        </label>
 
         <label className="settings-field">
           EV display

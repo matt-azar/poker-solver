@@ -13,7 +13,7 @@ import { useHelpChatStore } from "../../state/assistantWindowStore";
 import { useSettingsStore } from "../../state/settingsStore";
 import { useSolutionsCatalogueUi } from "../../state/solutionsCatalogueUi";
 import { useStudyStore, type WorkspaceId } from "../../state/studyStore";
-import { applyDocumentTheme, useThemeStore } from "../../state/themeStore";
+import { applyDocumentTheme } from "../../state/themeStore";
 import { StudyAssistantWindow } from "../assistant/StudyAssistantWindow";
 import { BuildWorkspace } from "../build/BuildWorkspace";
 import { CompareWorkspace } from "../compare/CompareWorkspace";
@@ -30,8 +30,6 @@ import { StatusBar } from "./StatusBar";
 export function AppShell() {
   const workspace = useStudyStore((s) => s.workspace);
   const setWorkspace = useStudyStore((s) => s.setWorkspace);
-  // themeStore is the single display + preference authority (R15).
-  const theme = useThemeStore((s) => s.theme);
   const setEvDisplayBasis = useStudyStore((s) => s.setEvDisplayBasis);
   const settings = useSettingsStore((s) => s.settings);
   const message = useStudyStore((s) => s.message);
@@ -51,8 +49,8 @@ export function AppShell() {
   const phoneDemo = usePhoneDemoLayout();
 
   useEffect(() => {
-    applyDocumentTheme(theme);
-  }, [theme]);
+    applyDocumentTheme("dark");
+  }, []);
 
   useEffect(() => {
     syncPublicDemoDocumentAttrs({
@@ -64,8 +62,6 @@ export function AppShell() {
     };
   }, [demoActive, phoneDemo]);
 
-  // Sync non-theme settings into the study store only — do not push
-  // settings.themePreference into themeStore (that wiped Theme-button choices).
   useEffect(() => {
     setEvDisplayBasis(settings.evDisplayBasis);
   }, [settings.evDisplayBasis, setEvDisplayBasis]);

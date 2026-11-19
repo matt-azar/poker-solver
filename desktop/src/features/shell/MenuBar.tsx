@@ -64,7 +64,6 @@ export function MenuBar({
   const reopenLastCheckpoint = useStudyStore((s) => s.reopenLastCheckpoint);
   const lastCheckpointPath = useStudyStore((s) => s.lastCheckpointPath);
   const openCatalogue = useSolutionsCatalogueUi((s) => s.openCatalogue);
-  const toggleTheme = useStudyStore((s) => s.toggleTheme);
   const resetLayout = useStudyStore((s) => s.resetLayout);
   const layout = useStudyStore((s) => s.layout);
   const setLayout = useStudyStore((s) => s.setLayout);
@@ -376,9 +375,6 @@ export function MenuBar({
         </span>
       </div>
       <div className="menu-bar__actions">
-        <button type="button" className="icon-btn" onClick={() => toggleTheme()} title="Theme">
-          Theme
-        </button>
         <button
           type="button"
           className="icon-btn menu-bar__gear"

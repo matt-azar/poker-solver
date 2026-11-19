@@ -10,8 +10,6 @@ export type MatrixMode =
 
 export type FrequencyMode = "aggression" | `${number}`;
 
-export type ThemePreference = "system" | "light" | "dark";
-
 export type SolvePhase =
   | "idle"
   | "building"
