@@ -186,7 +186,7 @@ Keep status polling across Open and Save. Let `engineClient.open` and `save` wai
 | Generic catalogue "Save failed" | Host rejected save (size/path/busy) but modal shows only "Save failed" | Wrap IPC save/open into `EngineError`; surface `Error.message` in `saveSolution` / `openSolution` — never keep only `instanceof EngineError` |
 | 512 MiB PSOL gate | Flop training Save fails after a healthy solve (~GiB live tables) | `max_psol_bytes` is **4 GiB**; oversize → `PsolTooLarge` / `psol_too_large`, not bare `InvalidPsol` |
 | Windows `\\?\` solutions root | Catalogue path from `solutions_root` canonicalize breaks Zig `openDir` | Strip verbatim prefixes before handing paths to the engine |
-| Full checkpoint always | Flop `.psol` ~3× larger than needed for Study | Catalogue mode **Study only** sends `study_only: true`. **Resumable checkpoint** keeps trainer tables and is the Continue path. Never drop trainer tables on Save without that choice |
+| Full checkpoint always | Flop `.psol` ~3× larger than needed for Study | Catalogue mode **Study** sends `study_only: true` and drops trainer tables. Mode **Continue** keeps them. Never drop trainer tables on Save without that choice |
 
 **Pointers:** `desktop/src/state/studyStore.ts` (`openSolution` / `saveSolution`), `formats/src/psol_v4.zig`, `desktop/src-tauri/src/solutions.rs`, `desktop/src/domain/requestScope.ts`.
 
@@ -294,7 +294,7 @@ Build **Save tree / Open tree** uses client JSON `holdem-study-betting-tree` v1 
 
 ### Create Build spot from Study
 
-Eligible only at **street-start** turn/river OOP decisions (#193). Copy **raw** strategy-conditioned reaches (not posterior marginals), node pot, and effective remaining stack; reuse source sizing via `GET …/config`; clear path-scoped tree edits / incentives / ICM. When IP aggressed on the prior street, **bake donk sizes** into OOP’s starting-street bets (new trees have no prior aggressor). Verify root legal actions with `tree-preview`; open Build for review — do **not** auto-solve. Midstreet extraction (facing bet / street contrib) stays out of scope until `StreetConfig` carries initial betting state.
+Eligible only at **street-start** turn/river OOP decisions (#193). Copy **raw** strategy-conditioned reaches (not posterior marginals), node pot, and effective remaining stack; reuse source sizing via host `get_config`; clear path-scoped tree edits / incentives / ICM. When IP aggressed on the prior street, **bake donk sizes** into OOP’s starting-street bets (new trees have no prior aggressor). Verify root legal actions with `tree_preview`; open Build for review — do **not** auto-solve. Midstreet extraction (facing bet / street contrib) stays out of scope until `StreetConfig` carries initial betting state.
 
 ### Study UI paint order
 
@@ -303,7 +303,7 @@ Matrix, Hands, Node Locking, and the Actions mix bar paint **passive → aggress
 ### Study UI copy (no permanent teaching / no internal jargon)
 
 - Do **not** ship permanently visible how-to lectures (“click to…”, “expand branches…”, empty-state tutorials, tip strips). Assume the user knows the product; keep control labels, field names, errors, status, units that encode meaning (`%`), and help behind explicit Help/Settings.
-- Do **not** put engine/API/debug wording in chrome or tooltips: snake_case field names (`estimated_peak_bytes`), “not RSS” disclaimers, `Pio lock_line`, `street-config`, CLI binary names, `dry-run plan`, etc. Visible memory/plan strips show human labels (Plan peak, Budget, pot, stack) only.
+- Do **not** put engine/API/debug wording in chrome or tooltips: snake_case field names (`estimated_peak_bytes`), “not RSS” disclaimers, `Pio lock_line`, `street-config`, CLI binary names, `dry-run plan`, etc. Visible memory/plan strips show Plan peak, Budget, decision count, deal count, pot, and stack.
 
 ### AI context packs / Study assistant
 

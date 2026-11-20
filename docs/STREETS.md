@@ -63,7 +63,7 @@ A range is a combo list in combo-index order. A chip size is written `20c`. A po
 
 An unknown field, a repeated field, extra space, or a version other than 1 is rejected. The parser does not build the tree. Compile rejects a board that is not three, four, or five cards, a nonpositive pot, and a range pair with no legal hands. `street-config-check <file>` parses a document and prints board length, pot, and stack. Iterations, accuracy, and the thread cap used at train time stay off this document. They go out through host `solve`.
 
-Study accuracy `0.05` stops when Pio Accuracy (NashConv/2) divided by the pot is at or below 0.05. The default unit is a pot fraction. An absolute chip target is a separate unit. Reported `nash_gap` is NashConv. `time_limit` stops at the next iteration boundary. Host status can include `time_limit_reached`. When `eval_every` is omitted, the host derives the sample period from `samples` and caps it at 10 iterations.
+Host `solve` `accuracy` is a pot fraction. `0.05` stops when Pio Accuracy (NashConv/2) divided by the pot is at or below 0.05. The Build Accuracy field is percent of pot: `0.5` in the field sends `0.005`. An absolute chip target is a separate unit. Reported `nash_gap` is NashConv. `time_limit` stops at the next iteration boundary. Host status can include `time_limit_reached`. When `eval_every` is omitted, the host derives the sample period from `samples` and caps it at 10 iterations.
 
 At most eight actions are legal at one decision. The Zig node stores eight child slots (`engine/src/game/compile.zig`). The public-tree limit is `memory_mib`, default 1024. One mebibyte is 1,048,576 bytes. Zero is rejected.
 

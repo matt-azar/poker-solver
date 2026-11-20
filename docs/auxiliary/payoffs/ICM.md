@@ -102,7 +102,7 @@ prefers Fold.
 
 ## Saves and Continue
 
-Resumable ICM checkpoints set PSOL v4 `flag_icm_modeled_train`. Open restores
+Continue-mode ICM saves set PSOL v4 `flag_icm_modeled_train`. Open restores
 trainer tables only when that flag is present (or the save has no ICM stacks).
 Pre-fix ICM files that trained in chips still open for browse, but Continue
 is disabled — run a fresh Solve. Cash-game saves are unchanged.

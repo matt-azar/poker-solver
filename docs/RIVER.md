@@ -26,7 +26,7 @@ Fractions are of the pot, rounded to the nearest tenth of a chip, with ties away
 
 - An opening size `f` bets `round(f * pot)` tenths (0.1-chip units).
 - A raise size `f` raises by `round(f * pot_after_the_call)` tenths. `pot_after_the_call` is the pot once the facing bet has been called. The raiser also puts in the call.
-- A listed size bigger than the remaining stack becomes an all-in when all-ins are allowed, and is dropped otherwise.
+- A listed size bigger than the remaining stack is re-interpreted as all-in. A legacy `allow-all-in 0` line still drops those sizes. `format_street_config` does not write `allow-all-in`.
 - Equal amounts are one action.
 - The minimum opening bet is 0.1 chip. A later raise must increase the commitment by at least the previous full bet or raise.
 - With equal stacks, a player who faces an all-in cannot raise.
