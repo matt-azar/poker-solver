@@ -128,7 +128,7 @@ Without a key the script exits 0 and reports `skipped`. Ordinary `npm test` / CI
 
 - Live OpenAI field accuracy is measured by `npm run test:assistant-live` with credentials; not gated in ordinary CI (cost / nondeterminism)
 - Floating chat geometry persists; message transcript is session-only (not durable)
-- Deep integration today covers help answers, study-setup mutations (ranges/board/tree/stacks), and bounded Study evidence tools (node strategy, bluff candidates, selected-hand EV/equity). Theme/layout toggles and starting Solve from chat are not yet tools.
+- The assistant answers help questions, writes study-setup mutations (ranges, board, tree, stacks), and reads bounded Study evidence (node strategy, bluff candidates, selected-hand EV/equity). It does not start a solve. There is no theme toggle.
 - Tauri credential store prefers the OS keyring with legacy-file migrate-on-read; distributed products should still proxy through an authenticated backend
 - Full-draft undo covers assistant transactions; ordinary Build field edits still use range-only undo plus revision bumps
 - Strategy explanations and autonomous research remain out of scope for truthful GTO claims

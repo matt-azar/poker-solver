@@ -30,7 +30,7 @@ Browser-only `npm run dev` does not start an engine.
 
 The Study page has three regions. Node navigation (board, betting line, action history) sits above the range matrix. A permanent right rail shows Actions and the combo inspector. The lower dock holds Compare runouts, Equity, Categories, and Value / Bluffs.
 
-Solve, Continue, Pause, and Stop are in the status bar. The bar shows Iter, EV, and Acc. More shows Time, ETA, Rate, Job, and Mem. Chrome is dark-only. Help (`?`) lists Solve (`S`), Stop (`X`), Continue (`C`), and Help.
+Solve, Continue, Pause, and Stop are in the status bar. The bar shows Iter, EV, and Acc. More shows Time, ETA, Rate, Job, and Mem. Chrome is dark-only. Help (`?`) lists Solve (`S`), Stop (`X`), Continue (`C`), and Toggle help (`?`).
 
 ## Other entries
 
@@ -52,17 +52,17 @@ IPC ops are protocol-2 host methods on `solver-engine` (`desktop/src/engine/tran
 | Continue | `solve` on open session (no `begin_config`) | Status bar | Same solution id; browse-only checkpoints disable Continue | store lifecycle; ZR-115 |
 | Browse node | `node` | Node nav, matrix, right rail (Actions + combo inspector) | One node at a time; root from `root_node_id` | browse vitest; contract smoke |
 | Action EV | `values` | Inspector / Analysis | Decision only; mid-train demux by `request_id` | analysis vitest; node-EV scripts |
-| Runouts | *(soft-gated)* | Study has no Runouts tab | Host `runouts` not enabled in `ipcCapabilities` | — |
+| Runouts | — | Study has no Runouts tab. A stored `runouts` or `explorer` tab id opens Equity. | The host has no `runouts` op. | — |
 | Next-card picker | chance `cards[]` on `node` | Board buttons → rank×suit picker; line-preserving turn/river via deal-chance ancestor | Rewrites current `pN.t/r` from chance child runout; flop edits and earlier-street swaps after a later card is dealt are unsupported; board blockers marked | `cards.test.ts`; CardPicker |
-| Equity (node) | `equity` | Study Equity tab: averages, clickable band filter, OOP vs IP chart, top hands; **Open in Equity** copies reach weights | Check-down (not chip EV); reach-weighted at selected node; buckets + `oop_hands`/`ip_hands`. There is no Runouts tab | analysis vitest; contract smoke |
+| Equity (node) | `equity` | Study Equity tab: averages, clickable band filter, OOP vs IP chart, top hands; **Open in Equity calculator** copies reach weights | Check-down (not chip EV); reach-weighted at selected node; buckets + `oop_hands`/`ip_hands`. There is no Runouts tab | analysis vitest; contract smoke |
 | Equity calculator | `start_equity_job` / `get_equity_job` / `cancel_equity_job` | Equity workspace (2–6 players, Auto/Exact/MC, dead cards, persistence) | No solution required; per-hand/next-card analysis not mounted | `equityStore` / client vitest; `scripts/zig/equity-calculator-smoke.py` (Study node equity uses `equity-smoke.py`) |
 | Value / Bluffs | Client join of node `strategy` + `equity` + `values` | Study **Value / Bluffs** tab | Size toggles keep combos with frequency on the enabled sizes and show that frequency. After call uses equity on the Call child of the highest-frequency enabled size. The table shows 50 rows and can load more. EV comes from `values` (`comboEv`). Reach is node reach mass | `valueBluffs.test.ts` |
 | Categories | `categories` | Categories tab with OOP/IP seat toggle; draws on flop/turn | River made-hand; flop/turn multi-label draws | analysis vitest (ZR-103) |
 | Locks | `list_locks` / `put_lock` / `delete_lock` (`scope` node\|line) | Node Locking workspace (Tree → Node locking…) | Default scope is this board; line lock is explicit; all-zero PUT rejected; 0%≠unlock | `locks.test.ts` |
 | Strategy edits | `list_strategy_edits` / `put_strategy_edit` / `delete_strategy_edit` | Strategy editor drawer (separate from locks) | Session-only overlays; sum≈1; clear restores CFR average | `strategyEdits.test.ts` (ZR-101) |
-| Resolve locked | `resolve_locked` | Solver menu + drawer | New solution + baseline | client IPC tests (ZR-100) |
+| Resolve locked | `resolve_locked` | Solve menu, Tree menu, and the lock drawer | New solution + baseline | client IPC tests (ZR-100) |
 | Compare | `compare` | Compare workspace | Immutable baseline retained on `resolve_locked`; strategy/EV deltas vs scenario | host + desktop vitest |
-| Save / Open | `save`, `open` | File menu / Study toolbar → in-app solutions catalogue | Mode **Study only** (`study_only: true`) or **Resumable checkpoint**. PSOL + locks; folders in localStorage index under managed solutions root; Browse disk secondary; invalid strategy rows rejected before replace. Browse-only files disable Continue | contract smoke; checkpoint + `solutionsCatalogue` vitest |
+| Save / Open | `save`, `open` | File → Save solution… / Open solution…, and Study Save / Open | Save mode **Study** sends `study_only: true` and drops trainer tables. Save mode **Continue** keeps them. PSOL + locks; folders in localStorage index under managed solutions root; Browse disk secondary; invalid strategy rows rejected before replace. Browse-only files disable Continue | contract smoke; checkpoint + `solutionsCatalogue` vitest |
 | Recent / templates / ranges | Tauri FS `library_*` (not engine HTTP) | Library + File menu | Nested `configs/ranges`; flat `configs/templates`; staged via `bundle.resources` | library IPC vitest; `check:library-assets` |
 | Config parse | local TS (`streetConfigText`) | Build | `street-config 1` only; echoes `tree_edits`; no host session mutate | `streetConfigText.test.ts` |
 | Memory plan dry-run | `plan_memory` | Build strip shows Plan peak, Budget, decision count, deal count, pot, and stack | JSON field `estimated_peak_bytes` is the plan. It is not process RSS. Temp compile. | TreeLineEditor tests |
@@ -82,7 +82,7 @@ IPC ops are protocol-2 host methods on `solver-engine` (`desktop/src/engine/tran
 - Action EV display: local decision EV by default (Fold = 0). Zig `values` ships `utility_basis: "local"` primary columns plus dual `root_centered` for Settings Global without refetch; `local_offset` remains for diagnostics / legacy shift
 - Matrix cell EV: Zig `values.cell_ev` (and `root_centered.cell_ev`) are posterior-weighted 169-cell aggregates; Study `groupEv` prefers them over per-hand client joins
 - Node `action_frequencies` (optional): posterior action mix on `node` when present; ActionSummary / path helpers prefer it over re-aggregating via `groupHands`
-- Accuracy: Pio exploitability (average of BR gains = NashConv/2); targets are Accuracy/pot by default (not a cutover Acc wall)
+- Accuracy: Pio exploitability (average of BR gains = NashConv/2). The Build field is percent of pot (`0.5` sends engine pot fraction `0.005`). Host `solve` compares Accuracy chips with that fraction times the chip pot. Acc walls are not a cutover gate.
 - Equity: fraction of pot — not chip EV
 - Equity histograms: ten fixed buckets on [0,1]; weights are raw input masses (`equity_distribution` OOP, `ip_equity_distribution` IP); Study filters bands client-side using `oop_hands`/`ip_hands`
 - Categories: strategy-weighted reach; seat fractions align with the `categories` name list; `exclusive` false for draw tags
@@ -94,7 +94,7 @@ IPC ops are protocol-2 host methods on `solver-engine` (`desktop/src/engine/tran
 | --- | --- |
 | Contracts + `EngineClient` | Done |
 | Study workspace (node nav, matrix, right rail, lower dock, board picker) | Done |
-| Analysis dock + Build + Library | Done — Equity hist + band filter + OOP vs IP chart; Categories made-hand/draws; Value / Bluffs Mode A/B (node vs after-call equity; &lt;/&gt; threshold); Library nested range folders |
+| Analysis dock + Build + Library | Done — Equity hist + band filter + OOP vs IP chart; Categories made-hand/draws; Value / Bluffs **At this node** and **After call**, with an equity threshold; Library nested range folders |
 | Locks + strategy edits | Done |
 | Compare | Done — host `compare` + Session baseline snapshot on resolve-locked; `compare: true` in `ipcCapabilities` |
 | Desktop packaging (Tauri + NSIS) | Done — unsigned CI artifact; see [Desktop packaging](#desktop-packaging) |

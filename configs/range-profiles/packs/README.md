@@ -21,7 +21,7 @@ Classification: `population_estimate` (user-provided). Stack/rake often unspecif
 
 ## Paired JSON profiles
 
-Schema-v1 paired JSON (legacy/alternate) can still be imported via Build → Range catalogue. Prefer adding new charts as seat×action `.txt` atoms in this folder.
+Schema-v1 paired JSON is not imported by the Study UI. Build → Catalogue saves seat×action charts. Prefer adding new charts as seat×action `.txt` atoms in this folder.
 
 ## Synthetic fixtures
 
