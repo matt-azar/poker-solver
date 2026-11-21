@@ -88,7 +88,7 @@ engine/ app/ formats/ host/ cli/   Zig solver, `solver-engine`, `holdem-study-cl
 build.zig / build.zig.zon          Zig workspace
 desktop/                           React Study UI + Tauri Windows shell
 configs/                           Defaults, ranges, templates; range-profiles/
-tests/fixtures/psol/               Tiny PSOL compatibility pins (Zig tests)
+tests/fixtures/psol/               Rejected pre-v4 PSOL files (Open must keep the prior solution)
 benchmarks/study/                  Study benchmark cases / configs
 docs/                              Primary docs; auxiliary/ for the rest
 docs/ai-context/                   Study assistant model packs (imported by desktop/)

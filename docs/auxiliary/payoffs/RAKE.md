@@ -39,8 +39,15 @@ Fold win, pot 100, contrib 100/0, IP folds, 5%: no-rake `(50, -50)` becomes
 
 ## Solve path
 
-`engine/src/kernel/terminal.zig` takes rake on the chip terminal, then optional
-ICM, then path incentives. The winner pays the full rake; ties split it. CFR
-trains on that modeled utility. NashConv under positive rake is the sum of
-the two unilateral gains in that utility. See [ICM.md](ICM.md). Zero rake keeps the
-no-rake chip terminals.
+Rake is part of the chip terminal (`payoff.chipTerminal`). The winner pays the
+full rake. Ties split it. The order after that is optional ICM, then path
+incentives.
+
+Deal-by-deal evaluation uses `terminalPayoff` in `engine/src/kernel/terminal.zig`.
+Production frozen CFR+ uses `FrozenCtx.modeledTerminal` in
+`engine/src/solve/frozen_walk.zig`. That path calls `chipTerminal` with the
+game rake, then the ICM cache when ICM is on, then the node incentive deltas.
+Both paths train on that modeled utility.
+
+NashConv under positive rake is the sum of the two unilateral gains in that
+utility. See [ICM.md](ICM.md). Zero rake keeps the no-rake chip terminals.
