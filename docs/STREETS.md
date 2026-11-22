@@ -75,7 +75,7 @@ Information-set indexing is compact: each public decision owns a `slot_of` map o
 
 `estimated_peak_bytes` is the labeled plan from `plan_memory` (`app/src/plan_preview.zig`). `allocated_bytes` and `peak_allocated_bytes` are the session's live total and high-water mark. `TrainingState` (`engine/src/solve/training_state.zig`) keeps three `f32` arrays of the same length: `regret`, `strategy_sum`, and `sigma` (12 bytes per hand-action entry while training). Publish writes a separate average buffer. `sigma` and `strategy_sum` stay allocated at the same time.
 
-Study exposes the labeled plan dry-run as host IPC `plan_memory` (and nested `plan` on `tree_preview`). **Estimated** is the labeled plan. **Measured** `allocated_bytes` and `peak_allocated_bytes` come from a full build. **RSS** is whole-process working set when the OS provides it.
+Study exposes the labeled plan dry-run as host IPC `plan_memory` (and nested `plan` on `tree_preview`). The Build strip shows Plan peak (`estimated_peak_bytes`), Budget (`memory_budget_bytes`), decision count, deal count, pot, and stack. `allocated_bytes` and `peak_allocated_bytes` are the session live total and high-water mark after a full build. Process RSS is outside that plan.
 
 Process RSS and native thread stacks sit outside `memory_mib`.
 

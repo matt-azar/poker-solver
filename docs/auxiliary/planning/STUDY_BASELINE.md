@@ -6,7 +6,7 @@ Product entry points: Zig `solver-engine` and the Study UI (`desktop/`). Living 
 
 ## In place
 
-- Study page: node navigation above the range matrix, a permanent right rail (Actions and the combo inspector), and a lower dock. The status bar holds Solve, Continue, Pause, Stop, Iter, EV, and Acc. Chrome is dark-only
+- Study page: node navigation above the range matrix, a permanent right rail (Actions and Hands), and a lower dock. The status bar holds Solve, Continue, Pause, Stop, Iter, EV, and Acc. Chrome is dark-only
 - Shared flop, turn, and river public tree in the Zig Session
 - Conditional action EV, check-down equity (+ buckets and an OOP vs IP chart), made-hand categories on five-card boards, flop/turn draw and backdoor tags. There is no Runouts tab.
 - Stop-and-keep, pause/continue, accuracy and wall-clock stopping (Acc walls are not cutover blockers)

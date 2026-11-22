@@ -28,9 +28,9 @@ Browser-only `npm run dev` does not start an engine.
 
 ## Study layout
 
-The Study page has three regions. Node navigation (board, betting line, action history) sits above the range matrix. A permanent right rail shows Actions and the combo inspector. The lower dock holds Compare runouts, Equity, Categories, and Value / Bluffs.
+The Study page has three regions. Node navigation (board, betting line, action history) sits above the range matrix. A permanent right rail shows Actions and Hands. The lower dock holds Compare runouts, Equity, Categories, and Value / Bluffs. The context strip shows board, pot, stack / SPR, root, to act, and line, plus Compare runouts on a turn or river decision, Save, and Open.
 
-Solve, Continue, Pause, and Stop are in the status bar. The bar shows Iter, EV, and Acc. More shows Time, ETA, Rate, Job, and Mem. Chrome is dark-only. Help (`?`) lists Solve (`S`), Stop (`X`), Continue (`C`), and Toggle help (`?`).
+Solve, Continue, Pause, and Stop are in the status bar. The bar shows Iter, EV, and Acc. More shows Time, ETA, Rate, Job, and Mem. Chrome is dark-only. The help overlay (`?`) lists `s` Solve, `x` Stop, `c` Continue, and `?` Toggle help. The Solve menu shows S, C, and X.
 
 ## Other entries
 
@@ -50,7 +50,7 @@ IPC ops are protocol-2 host methods on `solver-engine` (`desktop/src/engine/tran
 | Solve | `begin_config` + `solve` | Build workspace + Solve | Reject if already running; empty≠absent bets; short-admit `{accepted,running}` | `client.test.ts`; contract smoke |
 | Pause / Stop | `pause`, `cancel` | Status bar | Chunk boundary before publish; Study stop → host cancel | client + store lifecycle tests |
 | Continue | `solve` on open session (no `begin_config`) | Status bar | Same solution id; browse-only checkpoints disable Continue | store lifecycle; ZR-115 |
-| Browse node | `node` | Node nav, matrix, right rail (Actions + combo inspector) | One node at a time; root from `root_node_id` | browse vitest; contract smoke |
+| Browse node | `node` | Node nav, matrix, right rail (Actions + Hands) | One node at a time; root from `root_node_id` | browse vitest; contract smoke |
 | Action EV | `values` | Inspector / Analysis | Decision only; mid-train demux by `request_id` | analysis vitest; node-EV scripts |
 | Runouts | — | Study has no Runouts tab. A stored `runouts` or `explorer` tab id opens Equity. | The host has no `runouts` op. | — |
 | Next-card picker | chance `cards[]` on `node` | Board buttons → rank×suit picker; line-preserving turn/river via deal-chance ancestor | Rewrites current `pN.t/r` from chance child runout; flop edits and earlier-street swaps after a later card is dealt are unsupported; board blockers marked | `cards.test.ts`; CardPicker |

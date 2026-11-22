@@ -1,7 +1,7 @@
 const std = @import("std");
 const chips = @import("chips.zig");
 
-/// Pio-style size tokens stored as f64 sentinels (same encoding as C++ size_spec.hpp).
+/// Pio-style size tokens stored as f64 sentinels.
 pub const chip_spec_floor: f64 = -1.0e8;
 pub const all_in_spec: f64 = -1.0e9;
 pub const geo_base: f64 = -2.0e9;

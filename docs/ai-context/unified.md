@@ -66,7 +66,7 @@ Use this when answering **how-to / product** questions via `answer_user`. Numeri
 
 1. **Build** — board, OOP/IP ranges, stacks/pot, tree bet sizes / Preview tree line editor.
 2. **Solve** (menu or `S`) — when the engine is connected and the draft is valid.
-3. **Study** — node navigation above the range matrix, permanent right rail (Actions and combo inspector), lower analysis dock. Solve, Continue, Pause, and Stop are in the status bar.
+3. **Study** — node navigation above the range matrix, permanent right rail (Actions and Hands), lower analysis dock. Solve, Continue, Pause, and Stop are in the status bar.
 4. **Pause / Continue / Stop** — chunk-boundary pause; Continue resumes; Stop ends.
 5. **File → Save / Open** — in-app solutions catalogue (folders allowed; Browse disk optional); Library lists recent solutions and templates.
 6. **Equity** — standalone equity calculator; Build can open current ranges there.
@@ -154,7 +154,7 @@ Settings opens from the menu-bar gear (aria-label **Settings**). **Algorithm** i
 
 ### Study / other
 
-- Study: node navigation (board, line, action history) above the range matrix; permanent right rail with Actions and the combo inspector; **Overlay → EV+Eq** among overlays; lower analysis dock (**Compare runouts**, **Equity**, **Categories**, **Value / Bluffs**). Equity is the histogram, band filter, and the OOP vs IP chart. There is no Runouts tab. Chrome is dark-only. Solve, Continue, Pause, and Stop are in the status bar (Iter, EV, Acc; More holds Time, ETA, Rate, Job, Mem).
+- Study: node navigation (board, line, action history) above the range matrix; permanent right rail with Actions and Hands; **Overlay → EV+Eq** among overlays; lower analysis dock (**Compare runouts**, **Equity**, **Categories**, **Value / Bluffs**). Equity is the histogram, band filter, and the OOP vs IP chart. There is no Runouts tab. Chrome is dark-only. Solve, Continue, Pause, and Stop are in the status bar (Iter, EV, Acc; More holds Time, ETA, Rate, Job, Mem). The context strip shows board, pot, stack / SPR, root, to act, line, Compare runouts on a turn or river decision, Save, and Open.
 - **Compare runouts** ranks cards on the current betting line from a river (or other) decision — check the displayed seat before reading the numbers. The assistant can open this report with card filters and frequency ranking via `compare_runouts`; clicks and **Open in Study** use the same navigation as a manual report click and stay bound to the send-time solution/policy.
 - **Value / Bluffs** lists betting candidates. Size toggles keep combos that use the selected size and show that size's frequency. Equity mode is **At this node** or **After call** (for each combo, equity on the Call child of that combo's highest-frequency enabled size). The table shows 50 rows and can load more. Assistant bluff candidates use node equity.
 - The floating Study assistant binds evidence to the **send-time** Study decision (solution, published policy revision, node, selected hand). Strategy / bluff / hand tools reuse the analysis scheduler and do **not** change Study selection. `compare_runouts` is the exception that opens Compare runouts with filters. The assistant never starts Solve.

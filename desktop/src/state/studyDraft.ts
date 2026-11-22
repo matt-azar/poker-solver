@@ -72,7 +72,7 @@ function finiteOrZero(value: unknown): number {
 }
 
 /**
- * Map POST /api/config JSON onto a SpotDraft patch.
+ * Map host `get_config` JSON onto a SpotDraft patch.
  * Preserves explicit zeros (rake_rate 0, pot_cap 0, …). Callers that load a
  * full template must merge onto a cleared base — see draftFromFullTemplate.
  */
