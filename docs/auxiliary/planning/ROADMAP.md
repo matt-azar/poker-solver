@@ -36,13 +36,13 @@ The living inventory is [FEATURE_PARITY.md](FEATURE_PARITY.md). Each leaf featur
 | Weighted range editing, range libraries, board input | 13×13 paint, presets, nested folders under `configs/ranges` (Tauri FS Library) | M2–M3 |
 | Configurable betting trees and visual line editing | `street-config 1` + tree edits; Study Build `tree_preview` / `plan_memory` | M3 |
 | Stop-and-keep, pause/continue, accuracy stopping | Present over IPC; construction-time stop/pause still publishes nothing; Acc walls ≠ cutover gates | M4 |
-| Full saves, resumable checkpoints, compact saves, lazy load | Versioned PSOL + recent files; compact/lazy open | M5, M10 |
+| Full saves, resumable checkpoints, compact saves, lazy load | PSOL v4. Save modes Study and Continue. Catalogue folders. Compact and lazy load are open | M5, M10 |
 | Broad practical betting-tree scale and competitive convergence | Study corpus + Zig digs; Pio parity unproven | M6 |
 | Full and combo node locking, editing, re-solving | Locks + resolve_locked + strategy edits + dual-session Compare over IPC | M7 |
 | Rake, ICM, opponent incentives | Pot rake, ICM, and path incentives on Zig terminals when configured; NashConv is then modeled utility | M8 |
 | Turn/river and multi-flop aggregation, filtered reports | Client Compare runouts; aggregation open | M9 |
 | Scriptable engine, durable batch queue, exports | Zig CLI + typed IPC; durable queue open | M9 |
-| Drill trainer, packs, session statistics, hand histories | `hand-history 1` schema only | M11 |
+| Drill trainer, packs, session statistics, hand histories | `hand-history 1` and `holdem-study-cli from-hh`. Packs, drills, and session statistics are open | M11 |
 | Preflop solver, weighted flop subsets, chart editor | Missing | M12 |
 | Modern study GUI: layouts, two-player grids, shortcuts, themes, localization | React Study dark-only chrome; node nav + matrix + permanent right rail; shortcuts S / X / C / ?. Saved layouts, localization, and a light theme are open | Land with each feature; finish in M13 |
 | Stable delivery, help, upgrade/recovery, complete validation | Unsigned Windows NSIS (Zig sidecar) + `zig.yml` / desktop CI; signed upgrade story open | Continuous; M13 release gate |
@@ -103,9 +103,9 @@ Design immutable solution revisions and an exclusive training owner. Browsing an
 
 ### M5 — Reliable saves, reload and recovery
 
-Define a versioned native container with configuration, structural fingerprint, action/combo order, algorithm/version parameters, iteration/averaging state, precision, utility model, locks, and checksums. Store a study snapshot and a resumable training checkpoint as separate files.
+Define a versioned native container with configuration, structural fingerprint, action/combo order, algorithm/version parameters, iteration/averaging state, precision, utility model, locks, and checksums. The shipped file is one PSOL v4. Save mode Study sets `study_only` and drops trainer tables. Save mode Continue keeps them. Separate study and checkpoint files are not the format.
 
-Implement atomic save/replace, load validation, bounded decompression and allocations, corruption/truncation handling, unsupported-version errors, and migration fixtures. Rebuild disposable rank caches at load time. A bounded recent-files list is in the Study File menu. Folders, tags, previews, and a richer overwrite flow remain open.
+Implement atomic save/replace, load validation, bounded decompression and allocations, corruption/truncation handling, unsupported-version errors, and migration fixtures. Rebuild disposable rank caches at load time. Recent solutions are listed in Library. File → Open solution… and the Study Open button open the solutions catalogue. The catalogue has user folders. Tags, solution previews, and a richer overwrite flow remain open.
 
 **Gate:** fresh-process load reproduces strategies, values, node queries and configuration; continuation matches an uninterrupted run. Interrupted writes preserve the prior file. Over-budget load fails cleanly without leaking the old/new engine. Full-size saves work before compact/lazy formats.
 
@@ -137,7 +137,7 @@ Add baseline-versus-modified comparison: strategy changes, both-player EV change
 
 ### M8 — Rake, ICM and opponent incentives
 
-The Zig terminal is chip+rake, then optional ICM, then path incentive deltas (`engine/src/kernel/terminal.zig`). Empty ICM and empty incentives leave the previous terminal unchanged. CFR and best response use each seat's modeled utility. Pot-rake rate/cap collection is in [RAKE.md](../payoffs/RAKE.md). ICM is in [ICM.md](../payoffs/ICM.md). Incentives are in [INCENTIVES.md](../payoffs/INCENTIVES.md). `street-config 1` carries `rake-rate`, `rake-cap`, optional `icm-stacks` / `icm-payouts`, and optional `incentive` / `edge-tag` lines.
+The terminal order is chip+rake, then optional ICM, then path incentive deltas. Deal-by-deal evaluation uses `engine/src/kernel/terminal.zig`. Production frozen CFR+ uses `FrozenCtx.modeledTerminal` in `engine/src/solve/frozen_walk.zig`. Empty ICM and empty incentives leave the chip terminal unchanged. CFR and best response use each seat's modeled utility. Pot-rake rate/cap collection is in [RAKE.md](../payoffs/RAKE.md). ICM is in [ICM.md](../payoffs/ICM.md). Incentives are in [INCENTIVES.md](../payoffs/INCENTIVES.md). `street-config 1` carries `rake-rate`, `rake-cap`, optional `icm-stacks` / `icm-payouts`, and optional `incentive` / `edge-tag` lines.
 
 Next: previews and scenario persistence, combo/draw auto-tags, runout incentives. Keep chip EV and modeled utility separately labeled. Do not claim chip Nash-gap under active incentives.
 
@@ -147,7 +147,7 @@ Pio exposes rake/ICM configuration and opponent profiling [S6, S7]. State conver
 
 ### M9 — Reports, automation and batch solving
 
-Current saves are PSOL v4. Deliver runout aggregation next: turn/river tables of action frequencies, EV/equity and hand-category breakdowns, sorting/filtering, charts and CSV. Extend to multi-flop reports over explicitly weighted board sets with board-texture filters. Pio's 3.9 release specifically adds richer flop aggregation [S8].
+Current saves are PSOL v4. Study Compare runouts reports one betting line across turn or river cards, with action frequencies, EV, and equity. `holdem-study-cli` (`plan`, `solve`, `from-hh`) and Build Export job / Import job share `holdem-study-job/1`. Still open: hand-category breakdowns on that report, charts, CSV, and multi-flop reports over explicitly weighted board sets with board-texture filters. Pio's 3.9 release specifically adds richer flop aggregation [S8].
 
 Every report states its weighting measure. Weight each report by compatible-pair mass. Distinguish ex-ante board frequency, frequency conditional on reaching a line, and an intentionally uniform study-board sample.
 
@@ -167,7 +167,7 @@ Treat omitted-street reconstruction as a separate mathematical feature. Persist 
 
 ### M11 — Trainer and study sessions
 
-The `hand-history 1` export schema is in place as the played-hand record self-play will emit; packs, drills, and session statistics are still open. Build training packs from saved solutions and scenario filters: position, board texture, hand category, action history, street and selected lines. Sample legal deals from the declared joint distribution. Provide reproducible seeds and a diagnostic mode that oversamples rare situations while labeling that sampling choice.
+The `hand-history 1` document is the played-hand record. `holdem-study-cli from-hh` reads a five-card file and writes a `holdem-study-job/1` job. Packs, drills, and session statistics are still open. Build training packs from saved solutions and scenario filters: position, board texture, hand category, action history, street and selected lines. Sample legal deals from the declared joint distribution. Provide reproducible seeds and a diagnostic mode that oversamples rare situations while labeling that sampling choice.
 
 Deliver table view, action controls, instant/delayed feedback, combo strategy and EV, local decision cost, review history, bookmarks, and session statistics. Score a mixed action by its EV, including low-frequency actions in the mix. Show local EV loss and whole-strategy exploitability as separate numbers.
 
@@ -223,7 +223,7 @@ Choose explicit release service-level targets after measuring a representative c
 
 Main path: M0 → M1 → M2 → M3 → M4 → M5. Performance M6 runs as a separately reviewed stream after M0; five-card production already shares the street tree — scale that one kernel. M7 needs M1/M4 and scenario persistence. M8 needs the numerical contract and payoff refactor. M9 needs stable configurations, analysis and saves. M10 depends on M5/M6; M11 depends on M1/M2/M5; M12 depends on demonstrated M6 scale plus M5/M9. M13 is continuous, with a final audit after required features land.
 
-Landed and tested (not a completed M2 or Pio parity claim): check-down equity + buckets with study band filtering and an OOP vs IP chart, five-card made-hand categories, flop/turn draw/backdoor categories, nested range folders, stop-and-keep, resumable PSOL, runout EV comparison, recent-files list, street-config templates, named range presets, street-first node locks. Still ahead: compact saves, reports/queue, trainer, preflop. M3 visual line editor + plan-memory dry-run, M7 free-form strategy editing, and M8 CategoryTag / dual-utility incentives landed on this track.
+Landed and tested (not a completed M2 or Pio parity claim): check-down equity + buckets with study band filtering and an OOP vs IP chart, the Equity Calculator, five-card made-hand categories, flop/turn draw/backdoor categories, nested range folders, stop-and-keep, PSOL v4 with Save modes Study and Continue, solution-catalogue folders, Library recent solutions, dual-session Compare, Compare runouts, dark-only chrome, street-config templates, named range presets, street-first node locks, and `holdem-study-cli from-hh`. Still ahead: compact saves, multi-flop reports, a durable queue, trainer packs, preflop. M3 visual line editor + plan-memory dry-run, M7 free-form strategy editing, and M8 CategoryTag / dual-utility incentives landed on this track.
 
 Per milestone: small specification, invariants and failure modes, reviewable commits, relevant checks, user-workflow demo, ledger update with evidence. Keep accepted tests. Rerun a historical campaign when the solver behavior it checks has changed.
 

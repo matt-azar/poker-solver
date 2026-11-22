@@ -1,12 +1,12 @@
-# PSOL rejection fixtures
+# PSOL fixtures
 
-These files are pre-v4 checkpoints. `formats` decode and Session `open` reject them. They are not Continue pins.
+These two files are pre-v4 checkpoints. Open rejects them. They are not resumable saves.
 
-| File | Open error |
+| File | Decode error |
 | --- | --- |
 | `street_kind1_v2_cfrplus_tiny.psol` | `LegacyCheckpointRejected` |
 | `river_kind2_v2_cfrplus_tiny.psol` | `Kind2RiverRejected` |
 
-The blobs match the old `v0.1.2` wire: versions 1–3, kinds 1–2. Current saves are PSOL v4 and store the CFR+ algorithm byte only. A failed open leaves the previous solution id in place.
+`formats/src/psol_v4.zig` reads version 4 only. A file version below 4 returns `LegacyCheckpointRejected`. If that old payload’s kind byte is 2, the error is `Kind2RiverRejected`. Session open of the street fixture returns `LegacyCheckpointRejected` and leaves the previous solution in place (`app/src/root.zig`).
 
-Tests: `formats/src/psol_v4.zig` (`reject legacy street fixture`, `reject kind2 river fixture`) and `app/src/root.zig` (legacy open does not replace the loaded solution).
+The bytes are the pin. Do not rewrite them as v4. Current product saves are PSOL v4.
