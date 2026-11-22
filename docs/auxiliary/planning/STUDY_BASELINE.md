@@ -15,13 +15,12 @@ Product entry points: Zig `solver-engine` and the Study UI (`desktop/`). Living 
 - Node locks, resolve-locked, and session strategy edits over typed IPC
 - Build preview tree with force/remove/add-size edits and a memory-plan dry run (`tree_preview` / `plan_memory`). The preview section and its decision branches start collapsed. The plan strip shows Plan peak, Budget, decision count, deal count, pot, and stack.
 - Portable `holdem-study-job/1` files. Build Export job / Import job and `holdem-study-cli` (`plan`, `solve`, `from-hh`) share that JSON. `from-hh` accepts five-card `hand-history 1` only. Settings shows CFR+ only.
-- Pot rake on the Zig compile/terminal path
+- Pot rake, ICM, and path incentives when `street-config 1` lists them. Settings has a Use ICM checkbox. NashConv is then modeled utility. Continue stays off on ICM saves that lack `flag_icm_modeled_train`
 - Windows NSIS installer for Holdem Study — Zig `solver-engine` only ([DESKTOP_UI.md](../../DESKTOP_UI.md))
 
 ## Still open
 
 - Pio multi-file compact library; durable batch queue; a host `runouts` op (the host has none; Study has no Runouts tab)
-- ICM and path incentives: on when the street-config lists them. NashConv is then modeled utility (`docs/auxiliary/payoffs/ICM.md`)
 - Trainer packs/drills; preflop
 - Code-signed Windows release; Pio matched quality/timing runs
 
