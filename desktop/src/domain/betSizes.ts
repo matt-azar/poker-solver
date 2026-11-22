@@ -4,7 +4,7 @@
  * Build inputs use pot percentages (`75` → 0.75 pot). Engine labels are chip
  * amounts (`Bet 75`); Study display can show pot tag + chips.
  *
- * Numeric encoding mirrors `include/game/size_spec.hpp`. A `number[]` entry is
+ * Numeric encoding matches `engine/src/poker/size_spec.zig`. A `number[]` entry is
  * one of: pot fraction (≥ 0), fixed chips (−chips in (−1e8, 0)), all-in (−1e9),
  * geometric (−2e9 − N streets), raise multiple (−3e9 − m), or explicit-empty
  * (−4e9). Prefer {@link formatEngineSpec} / {@link encodeBetList} over reading

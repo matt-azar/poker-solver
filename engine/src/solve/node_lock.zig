@@ -1,7 +1,7 @@
-//! Node / line lock model + text codec (C++ include/solver/node_lock.hpp).
+//! Node / line lock model + text codec.
 //! Study overlay persistence uses this text in `.psol` v4. Row helpers
 //! (`applyLockToStrategy` / `applyLockToStrategyF32`) overwrite regret-matched
-//! σ; frozen CFR freeze/floorAndFreeze call the f32 helper (C++ `apply_freeze_range`).
+//! σ; frozen CFR freeze/floorAndFreeze call the f32 helper.
 //!
 //! Pio-style locks freeze each combo's own action mix. Prefer
 //! `combo_indices` + `combo_actions` (parallel per-combo rows). Legacy shared

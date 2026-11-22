@@ -28,9 +28,9 @@ Browser-only `npm run dev` does not start an engine.
 
 ## Study layout
 
-The Study page has three regions. Node navigation (board, betting line, action history) sits above the range matrix. A permanent right rail shows Actions and the combo inspector. The lower dock holds Compare runouts, Equity, Categories, and Value / Bluffs.
+The Study page has three regions. Node navigation (board, betting line, action history) sits above the range matrix. A permanent right rail shows Actions and Hands. The lower dock holds Compare runouts, Equity, Categories, and Value / Bluffs. The context strip shows board, pot, stack / SPR, root, to act, and line, plus Compare runouts on a turn or river decision, Save, and Open.
 
-Solve, Continue, Pause, and Stop are in the status bar. The bar shows Iter, EV, and Acc. More shows Time, ETA, Rate, Job, and Mem. Chrome is dark-only. Help (`?`) lists Solve (`S`), Stop (`X`), Continue (`C`), and Toggle help (`?`).
+Solve, Continue, Pause, and Stop are in the status bar. The bar shows Iter, EV, and Acc. More shows Time, ETA, Rate, Job, and Mem. Chrome is dark-only. The help overlay (`?`) lists `s` Solve, `x` Stop, `c` Continue, and `?` Toggle help. The Solve menu shows S, C, and X.
 
 ## Other entries
 
@@ -50,13 +50,13 @@ IPC ops are protocol-2 host methods on `solver-engine` (`desktop/src/engine/tran
 | Solve | `begin_config` + `solve` | Build workspace + Solve | Reject if already running; empty≠absent bets; short-admit `{accepted,running}` | `client.test.ts`; contract smoke |
 | Pause / Stop | `pause`, `cancel` | Status bar | Chunk boundary before publish; Study stop → host cancel | client + store lifecycle tests |
 | Continue | `solve` on open session (no `begin_config`) | Status bar | Same solution id; browse-only checkpoints disable Continue | store lifecycle; ZR-115 |
-| Browse node | `node` | Node nav, matrix, right rail (Actions + combo inspector) | One node at a time; root from `root_node_id` | browse vitest; contract smoke |
+| Browse node | `node` | Node nav, matrix, right rail (Actions + Hands) | One node at a time; root from `root_node_id` | browse vitest; contract smoke |
 | Action EV | `values` | Inspector / Analysis | Decision only; mid-train demux by `request_id` | analysis vitest; node-EV scripts |
 | Runouts | — | Study has no Runouts tab. A stored `runouts` or `explorer` tab id opens Equity. | The host has no `runouts` op. | — |
 | Next-card picker | chance `cards[]` on `node` | Board buttons → rank×suit picker; line-preserving turn/river via deal-chance ancestor | Rewrites current `pN.t/r` from chance child runout; flop edits and earlier-street swaps after a later card is dealt are unsupported; board blockers marked | `cards.test.ts`; CardPicker |
 | Equity (node) | `equity` | Study Equity tab: averages, clickable band filter, OOP vs IP chart, top hands; **Open in Equity calculator** copies reach weights | Check-down (not chip EV); reach-weighted at selected node; buckets + `oop_hands`/`ip_hands`. There is no Runouts tab | analysis vitest; contract smoke |
 | Equity calculator | `start_equity_job` / `get_equity_job` / `cancel_equity_job` | Equity workspace (2–6 players, Auto/Exact/MC, dead cards, persistence) | No solution required; per-hand/next-card analysis not mounted | `equityStore` / client vitest; `scripts/zig/equity-calculator-smoke.py` (Study node equity uses `equity-smoke.py`) |
-| Value / Bluffs | Client join of node `strategy` + `equity` + `values` | Study **Value / Bluffs** tab | Size toggles keep combos with frequency on the enabled sizes and show that frequency. After call uses equity on the Call child of the highest-frequency enabled size. The table shows 50 rows and can load more. EV comes from `values` (`comboEv`). Reach is node reach mass | `valueBluffs.test.ts` |
+| Value / Bluffs | Client join of node `strategy` + `equity` + `values` | Study **Value / Bluffs** tab | Size toggles keep combos with frequency on the enabled sizes and show that frequency. After call uses equity on the Call child of each combo's highest-frequency enabled size. The table shows 50 rows and can load more. EV comes from `values` (`comboEv`). Reach is node reach mass | `valueBluffs.test.ts` |
 | Categories | `categories` | Categories tab with OOP/IP seat toggle; draws on flop/turn | River made-hand; flop/turn multi-label draws | analysis vitest (ZR-103) |
 | Locks | `list_locks` / `put_lock` / `delete_lock` (`scope` node\|line) | Node Locking workspace (Tree → Node locking…) | Default scope is this board; line lock is explicit; all-zero PUT rejected; 0%≠unlock | `locks.test.ts` |
 | Strategy edits | `list_strategy_edits` / `put_strategy_edit` / `delete_strategy_edit` | Strategy editor drawer (separate from locks) | Session-only overlays; sum≈1; clear restores CFR average | `strategyEdits.test.ts` (ZR-101) |
@@ -71,8 +71,8 @@ IPC ops are protocol-2 host methods on `solver-engine` (`desktop/src/engine/tran
 | Betting tree Save / Open | Client JSON (`holdem-study-betting-tree` v1) in localStorage | Build → Betting tree catalogue | Sizes, caps, `tree_edits` only; flat list (no folders) | `bettingTreeCatalogue` |
 | Solutions catalogue | PSOL paths + folder index (`holdem-study-solutions`) | Study Save/Open + Library recent | User folders (multi-level); managed root via Tauri `solutions_*`; no OS picker as primary | `solutionsCatalogue` |
 | Compare runouts | Host `line_card_report` (fallback: multi-`getNode`) | Study dock + context-strip | Prefer fat Zig report; legacy multi-getNode kept | `lineCardReport` + LowerDock |
-| Value/Bluffs after-call | Host `value_bluffs_post_call` (fallback: bet→Call equity walk) | Value/Bluffs **After call** | Host `hands_by_action` joins each size's Call child. The panel uses the highest-frequency enabled size | `valueBluffsPostCall` |
-| Create Build spot from here | Client draft from node + `get_config` | Context strip → Build draft | Midstreet (facing bet / contrib) not supported; asymmetric stacks use `min` | `build/transferFromStudy` |
+| Value/Bluffs after-call | Host `value_bluffs_post_call` (fallback: bet→Call equity walk) | Value/Bluffs **After call** | Host `hands_by_action` has each size's Call child. Each combo uses that combo's highest-frequency enabled size | `valueBluffsPostCall` |
+| Create Build spot from here | Client draft from node + `get_config` | `studyStore.createBuildSpotFromHere` | Street-start turn or river OOP only. Midstreet (facing bet / contrib) not supported; asymmetric stacks use `min`. No control calls this method | `build/transferFromStudy` |
 | Study assistant (AI) | Client-side unified chat + bounded Study evidence tools | Floating Study assistant (menu bar **Assistant**) | OpenAI credentials required in product UI; no autonomous solve / filesystem; pot type required; silent rake → cEV, silent stack → 100bb | assistant domain vitest — see [STUDY_SETUP_ASSISTANT.md](STUDY_SETUP_ASSISTANT.md), [ai-context](ai-context/README.md) |
 | Algorithm | Host always trains CFR+ (`trainFrozenCfrPlus`) | Settings shows a read-only CFR+ field | Opening Settings sets the draft algorithm to `cfr_plus`. PSOL v4 stores the CFR+ byte only. Train threads from config are capped by `WorkerBudget` (n−2 on 4+ CPUs) | `formats/src/psol_v4.zig`; `host/src/workers.zig` |
 

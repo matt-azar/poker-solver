@@ -243,7 +243,7 @@ At a flop root, `t-1.r-1` is both the node id and the line key — **do not infe
 
 User-facing Study copy says **Equity** (not “Check-down equity”); the quantity is still check-down pot fraction, not chip EV (#189). The dock tab label is **Equity**.
 
-Study chrome is dark-only. Do not restore a light or system theme toggle. A stored light or system preference is dropped on read. The Study page is node navigation above the matrix and a permanent right rail (Actions and the combo inspector). Solve, Continue, Pause, and Stop are in the status bar. Visible metrics are Iter, EV, and Acc. Time, ETA, Rate, Job, and Mem are under More. Help lists `S`, `X`, `C`, and `?`. There is no board shortcut. Value / Bluffs size toggles keep a combo at the selected size's frequency. After call uses the Call child of the highest-frequency enabled size (#463, #489, #490).
+Study chrome is dark-only. Do not restore a light or system theme toggle. A stored light or system preference is dropped on read. The Study page is node navigation above the matrix and a permanent right rail (Actions and Hands). Solve, Continue, Pause, and Stop are in the status bar. Visible metrics are Iter, EV, and Acc. Time, ETA, Rate, Job, and Mem are under More. The help overlay lists `s`, `x`, `c`, and `?`. There is no board shortcut. Value / Bluffs size toggles keep a combo at the selected size's frequency. After call uses the Call child of each combo's highest-frequency enabled size (#463, #489, #490).
 
 Hands / Eq overlay: wire acting-seat equity (not an empty `Map`); look up via normalized `comboKey` (suit-order variants); gate ready/pending with solution+node id so navigate does not show another node’s Eq (#170). Node inspect must fill strategy-conditioned `reach` / `marginal` or the matrix treats every cell as undefined (#292).
 
@@ -279,14 +279,13 @@ Street text: omit empty size lists; chip sizes as `20c`; nonnegative = pot fract
 
 ### Study / street-config bet arrays
 
-- **Absent** bet lists → defaults `{0.5, 1}`. An empty list is check-only.
-- **Present empty array** → check-only.
-- Raise lists are separate from bets: absent raises copy bets when multiples are also empty; present empty stays empty. The engine does not copy bets into an empty raise list. Study copies a blank raise box into that street's raise list before sending.
-- A zero-length per-street list still falls back to the shared list. A one-element explicit-empty sentinel (`-`, stored as `-4e9`) does not. `e` / `2e` / `3e` / `a` / `Nx` stay sentinels until the decision node. Study Build blank bet = check-only; on import, empty street lists are resolved into shared sizes so rebuild keeps the same tree.
-- `max_raises` counts facing raises only (opening street bets do not consume the cap). All-in is added only when that situation already lists a size, or the token `a` put one there. There is no `geometric` config/CLI/job flag — list `e` / `a` per street.
+- A missing size field and an empty list are the same: no sizes. There is no `{0.5, 1}` default. Empty bets are check-only.
+- Raise lists do not copy bet sizes. An empty raise list is no pot-fraction raise. Multiples, `e`, and `a` can still apply. When multiples are set and both raise lists are empty, the engine uses only the multiples.
+- A zero-length per-street list still falls back to the shared list. A one-element explicit-empty sentinel (`-`, stored as `-4e9`) does not. `e` / `2e` / `3e` / `a` / `Nx` stay sentinels until the decision node. Study Build blank bet is check-only. A blank raise box is no pot-fraction raises. On import, empty street lists are filled from the shared list so the text rebuilds the same tree.
+- `max_raises` counts facing raises only (opening street bets do not consume the cap). A listed size above the remaining stack is all-in. Token `a` is an explicit all-in. There is no `geometric` config/CLI/job flag — list `e` / `a` per street.
 - **Build donk UI:** Turn/River donk size fields only — there is no Flop donk control (#195). AI context packs CI-reject stale “Flop donk” claims.
 
-**Don't:** “Normalize” empty arrays back to defaults (historical note: [EXPLORER.md](../../EXPLORER.md)).
+**Don't:** Invent a `{0.5, 1}` bet default or copy bet sizes into an empty raise list. See [STREETS.md](../../STREETS.md).
 
 ### Betting-tree files vs spot drafts
 
@@ -294,7 +293,7 @@ Build **Save tree / Open tree** uses client JSON `holdem-study-betting-tree` v1 
 
 ### Create Build spot from Study
 
-Eligible only at **street-start** turn/river OOP decisions (#193). Copy **raw** strategy-conditioned reaches (not posterior marginals), node pot, and effective remaining stack; reuse source sizing via host `get_config`; clear path-scoped tree edits / incentives / ICM. When IP aggressed on the prior street, **bake donk sizes** into OOP’s starting-street bets (new trees have no prior aggressor). Verify root legal actions with `tree_preview`; open Build for review — do **not** auto-solve. Midstreet extraction (facing bet / street contrib) stays out of scope until `StreetConfig` carries initial betting state.
+Eligible only at **street-start** turn/river OOP decisions (#193). Copy **raw** strategy-conditioned reaches (not posterior marginals), node pot, and effective remaining stack; reuse source sizing via host `get_config`; clear path-scoped tree edits / incentives / ICM. When IP aggressed on the prior street, **bake donk sizes** into OOP’s starting-street bets (new trees have no prior aggressor). Verify root legal actions with `tree_preview`; open Build for review — do **not** auto-solve. Midstreet extraction (facing bet / street contrib) stays out of scope until `StreetConfig` carries initial betting state. No Study control calls `createBuildSpotFromHere`. The context strip shows Compare runouts, Save, and Open.
 
 ### Study UI paint order
 
@@ -398,7 +397,7 @@ Check-down equity is a **fraction of the pot** under check-down. Strategic EV is
 | Limit | Where | Agent mistake |
 | --- | --- | --- |
 | ≤ 8 legal actions at a decision | `engine/src/game/compile.zig` node `child[8]`; `frozen_walk.zig` `max_actions` | Large size lists without merging |
-| `StreetGame` ≤ ~200k terminals | reference enumerator | “Fix” big spots by raising the cap instead of using batch |
+| No public-terminal count cap | `memory_mib` bounds engine heap | Do not add a 200k terminal cap or raise one that is not there |
 | Equity work limit ~1.1e6 pair-runouts | library / Equity Calculator default | Full-range turn rejected; don't silently sample |
 | Study equity ceiling 51,369,120 pair-runouts | host constant `study_explorer_max_pair_runouts` (`engine/src/analysis/equity.zig`). `solver-engine` has no `--max-pair-runouts` flag | Dense flop check-down can still return `WorkLimit`. Warm path uses `study_warm_max_hand_runouts` (hand×runout), not this pair-runout ceiling |
 | Public tree depth / history caps | street index | Pathological trees |

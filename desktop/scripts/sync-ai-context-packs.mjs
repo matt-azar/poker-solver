@@ -38,7 +38,7 @@ const FORBIDDEN = [
   },
   {
     re: /There is no Apply button/i,
-    why: "Apply appears when auto-commit is blocked; say auto-write + conflict Apply instead",
+    why: "Pending setups use Keep, Keep anyway, and Undo. Do not say there is no Apply button",
   },
   {
     // Title-case "Flop donk" was the old Build label. Allow lowercase

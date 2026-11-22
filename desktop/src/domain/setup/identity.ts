@@ -407,7 +407,7 @@ export function openDraftBase(solutionPath = ""): SpotDraft {
 }
 
 /**
- * Map GET /api/solutions/{id}/config (or POST /api/config) JSON onto SpotDraft.
+ * Map host `get_config` JSON onto SpotDraft.
  * Empty per-street lists (inherit) are resolved into shared sizes so Build text
  * rebuilds the same tree. Explicit-empty stays blank (check-only) or `-`.
  */

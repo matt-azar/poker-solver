@@ -1,4 +1,4 @@
-//! Free-form strategy-edit overlays (C++ include/solver/strategy_edit.hpp).
+//! Free-form strategy-edit overlays.
 //! Distinct from LockSet: edits rewrite published average rows for browse / EV;
 //! they do not constrain CFR regret matching. Persisted as Session
 //! `strategy_edits_text` in `.psol` v4.

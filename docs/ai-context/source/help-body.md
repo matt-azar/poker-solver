@@ -7,7 +7,7 @@
 
 1. **Build** — board, OOP/IP ranges, stacks/pot, tree bet sizes / Preview tree line editor.
 2. **Solve** (menu or `S`) — when the engine is connected and the draft is valid.
-3. **Study** — node navigation above the range matrix, permanent right rail (Actions and combo inspector), lower analysis dock. Solve, Continue, Pause, and Stop are in the status bar.
+3. **Study** — node navigation above the range matrix, permanent right rail (Actions and Hands), lower analysis dock. Solve, Continue, Pause, and Stop are in the status bar.
 4. **Pause / Continue / Stop** — chunk-boundary pause; Continue resumes; Stop ends.
 5. **File → Save / Open** — in-app solutions catalogue (folders allowed; Browse disk optional); Library lists recent solutions and templates.
 6. **Equity** — standalone equity calculator; Build can open current ranges there.
