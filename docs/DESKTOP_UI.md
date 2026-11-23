@@ -51,7 +51,7 @@ IPC ops are protocol-2 host methods on `solver-engine` (`desktop/src/engine/tran
 | Pause / Stop | `pause`, `cancel` | Status bar | Chunk boundary before publish; Study stop → host cancel | client + store lifecycle tests |
 | Continue | `solve` on open session (no `begin_config`) | Status bar | Same solution id; browse-only checkpoints disable Continue | store lifecycle; ZR-115 |
 | Browse node | `node` | Node nav, matrix, right rail (Actions + Hands) | One node at a time; root from `root_node_id` | browse vitest; contract smoke |
-| Action EV | `values` | Inspector / Analysis | Decision only; mid-train demux by `request_id` | analysis vitest; node-EV scripts |
+| Action EV | `values` | Matrix overlay and Hands | Decision only; mid-train demux by `request_id` | analysis vitest; node-EV scripts |
 | Runouts | — | Study has no Runouts tab. A stored `runouts` or `explorer` tab id opens Equity. | The host has no `runouts` op. | — |
 | Next-card picker | chance `cards[]` on `node` | Board buttons → rank×suit picker; line-preserving turn/river via deal-chance ancestor | Rewrites current `pN.t/r` from chance child runout; flop edits and earlier-street swaps after a later card is dealt are unsupported; board blockers marked | `cards.test.ts`; CardPicker |
 | Equity (node) | `equity` | Study Equity tab: averages, clickable band filter, OOP vs IP chart, top hands; **Open in Equity calculator** copies reach weights | Check-down (not chip EV); reach-weighted at selected node; buckets + `oop_hands`/`ip_hands`. There is no Runouts tab | analysis vitest; contract smoke |
@@ -72,7 +72,7 @@ IPC ops are protocol-2 host methods on `solver-engine` (`desktop/src/engine/tran
 | Solutions catalogue | PSOL paths + folder index (`holdem-study-solutions`) | Study Save/Open + Library recent | User folders (multi-level); managed root via Tauri `solutions_*`; no OS picker as primary | `solutionsCatalogue` |
 | Compare runouts | Host `line_card_report` (fallback: multi-`getNode`) | Study dock + context-strip | Prefer fat Zig report; legacy multi-getNode kept | `lineCardReport` + LowerDock |
 | Value/Bluffs after-call | Host `value_bluffs_post_call` (fallback: bet→Call equity walk) | Value/Bluffs **After call** | Host `hands_by_action` has one equity list per size's Call child. The panel joins each combo to that combo's highest-frequency enabled size | `valueBluffsPostCall` |
-| Create Build spot from here | Client draft from node + `get_config` | Context strip → Build draft | Midstreet (facing bet / contrib) not supported; asymmetric stacks use `min` | `build/transferFromStudy` |
+| Create Build spot from here | Client draft from node + `get_config` | No mounted control. `createBuildSpotFromHere` is store-only. The context strip shows Compare runouts, Save, and Open | Midstreet (facing bet / contrib) not supported; asymmetric stacks use `min` | `build/transferFromStudy` |
 | Study assistant (AI) | Client-side unified chat + bounded Study evidence tools | Floating Study assistant (menu bar **Assistant**) | OpenAI credentials required in product UI; no autonomous solve / filesystem; pot type required; silent rake → cEV, silent stack → 100bb | assistant domain vitest — see [STUDY_SETUP_ASSISTANT.md](STUDY_SETUP_ASSISTANT.md), [ai-context](ai-context/README.md) |
 | Algorithm | Host always trains CFR+ (`trainFrozenCfrPlus`) | Settings shows a read-only CFR+ field | Opening Settings sets the draft algorithm to `cfr_plus`. PSOL v4 stores the CFR+ byte only. Train threads from config are capped by `WorkerBudget` (n−2 on 4+ CPUs) | `formats/src/psol_v4.zig`; `host/src/workers.zig` |
 
@@ -148,12 +148,12 @@ npm run tauri:build
 
 | Lock / strategy / compare op | UI | Backend |
 | --- | --- | --- |
-| Apply selected/full lock | Node Locking workspace (paint hand classes) | `put_lock` |
-| Unlock | Node Locking workspace | `delete_lock` |
-| Apply free-form strategy edit | Strategy editor / inspector | `put_strategy_edit` |
-| Clear strategy edits | Strategy editor | `delete_strategy_edit` |
-| Resolve locked | Solve/Tree menus + drawer | `resolve_locked` |
-| Compare revisions | Compare workspace | `compare` (baseline snapshot vs scenario) |
+| Lock selected / Lock selected on line / Lock all hands / Lock line across runouts | Node Locking workspace (paint hand classes) | `put_lock` |
+| Unlock selected / Unlock node / Unlock line across runouts / Clear all locks | Node Locking workspace | `delete_lock` |
+| Apply strategy edit | Strategy editor | `put_strategy_edit` |
+| Clear selected edits / Clear node edits / Clear all strategy edits | Strategy editor | `delete_strategy_edit` |
+| Resolve locked | Solve menu, Tree menu, and the lock drawer | `resolve_locked` |
+| Compare to baseline | Compare workspace and the lock drawer | `compare` (baseline snapshot vs scenario) |
 
 ## Validation notes
 

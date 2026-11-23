@@ -179,7 +179,7 @@ export class FakeHelpChatClient implements HelpChatClient {
       return {
         provider: "fake",
         message:
-          "On Build, set board, pot type (SRP/3BP/4BP), stacks, and ranges (Catalogue seat×action tree or paint grids), then Solve. You can also ask this Study assistant to change Build with an explicit command such as “Set up CO vs BB SRP.”",
+          "On Build, set board, stacks, and ranges (Catalogue seat×action tree or paint grids), then Solve. Pot type (SRP/3BP/4BP) is for the Study assistant when you ask it to set up a spot. You can also ask this Study assistant to change Build with an explicit command such as “Set up CO vs BB SRP.”",
       };
     }
     if (/catalogue|range profile|prepare a study|seat.?action/.test(q)) {
@@ -200,14 +200,14 @@ export class FakeHelpChatClient implements HelpChatClient {
       return {
         provider: "fake",
         message:
-          "Use Solve (S) from the Solve menu when the engine is connected and the Build draft is valid. Pause stops at a chunk boundary; Continue resumes the same solution; Stop ends the run. Solving is local via explorer — it does not need OpenAI.",
+          "Use Solve (S) from the status bar or the Solve menu when the engine is connected and the Build draft is valid. Pause stops at a chunk boundary; Continue resumes the same solution; Stop ends the run. Solving is local via solver-engine. It does not need OpenAI.",
       };
     }
     if (/workspace|build|study|compare|library/.test(q)) {
       return {
         provider: "fake",
         message:
-          "Workspaces: Build (set up the spot), Study (browse strategy after a solve), Compare (vs baseline), Library (recent solutions and range templates).",
+          "Workspaces: Study, Build, Equity, Compare (vs baseline), and Library (recent solutions and range templates).",
       };
     }
     if (/equity|nash|ev|accuracy/.test(q)) {

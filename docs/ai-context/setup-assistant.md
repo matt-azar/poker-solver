@@ -100,7 +100,7 @@ Not mounted as Build form controls (but still draft fields the assistant may wri
 
 ### Settings (Solve section)
 
-Settings opens from the menu-bar gear (aria-label **Settings**). **Algorithm** is a read-only CFR+ field. Opening Settings sets the draft algorithm to `cfr_plus`. Other fields: samples, threads, memory MiB, solution path, incentives, edge tags, ICM stacks/payouts, display prefs (**EV display** Local / **Global EV (root-centered)**, bet-size labels). Chrome is dark-only (no theme/light toggle). The host trains CFR+. PSOL saves store the CFR+ algorithm byte.
+Settings opens from the menu-bar gear (aria-label **Settings**). **Algorithm** is a read-only CFR+ field. Opening Settings sets the draft algorithm to `cfr_plus`. Other fields: samples, threads, memory MiB, solution path, incentives, edge tags, ICM stacks/payouts. **EV display** options are **Local EV (Fold = 0)** and **Global EV (root-centered)**. **Bet size labels** options are Pot tag + chips, Pot tag only, and Chips only. Buttons are **Reset to fast** and **Reset display defaults**. Chrome is dark-only (no theme/light toggle). The host trains CFR+. PSOL saves store the CFR+ algorithm byte.
 
 ### Study / other
 
