@@ -88,11 +88,11 @@ Exact catalogue match still preferred when a reliable pack exists.
 | Fake adapter | Deterministic local interpreter for tests and demos |
 | OpenAI adapter | Structured tool/function calling; default model `gpt-4.1-mini` |
 | Credential in JS bundle / installer / source | **Not supported** — never commit keys |
-| Tauri desktop prototype | Native commands `assistant_secret_*` store the key in the OS credential store (`holdem-study` / Windows Credential Manager, macOS Keychain, Linux kernel keyutils). Legacy `assistant_secrets.json` (app config dir, mode `0600` on Unix) is migrated into the keyring on first successful read/write, then removed. If the OS store is unavailable, the legacy file remains a degraded fallback. |
-| Browser prototype credential | Optional `localStorage` key `holdem-study-openai-key`, or paste in the OpenAI provider UI |
+| Packaged Tauri app | Native commands `assistant_secret_*` store the key in the OS credential store (`holdem-study` / Windows Credential Manager, macOS Keychain, Linux kernel keyutils). Legacy `assistant_secrets.json` (app config dir, mode `0600` on Unix) is migrated into the keyring on first successful read/write, then removed. If the OS store is unavailable, the legacy file remains a degraded fallback. |
+| Browser dev credential | Optional `localStorage` key `holdem-study-openai-key`, or paste in the OpenAI provider UI. `npm run dev` does not start `solver-engine`. |
 | Authenticated backend proxy | **Not built** — required for a distributed product so clients do not hold long-lived vendor keys |
 
-Credential lookup prefers Tauri storage when running inside the shell, then the browser prototype key. Solving stays on the local `solver-engine`. The assistant does not start a solve. The product UI requires an OpenAI key for the Study assistant. The fake provider is for tests.
+Credential lookup prefers Tauri storage when running inside the shell, then the browser dev key. Solving stays on the local `solver-engine`. The assistant does not start a solve. The product UI requires an OpenAI key for the Study assistant. The fake provider is for tests.
 
 External processing disclosure: the OpenAI path sends setup summaries, preference summaries, and catalogue **metadata** (ids, labels, stacks, pot type) — not full private range strings when identifiers suffice.
 

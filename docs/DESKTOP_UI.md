@@ -28,7 +28,7 @@ Browser-only `npm run dev` does not start an engine.
 
 ## Study layout
 
-The Study page has three regions. Node navigation (board, betting line, action history) sits above the range matrix. A permanent right rail shows Actions and Hands. The lower dock holds Compare runouts, Equity, Categories, and Value / Bluffs. The context strip shows board, pot, stack / SPR, root, to act, and line, plus Compare runouts on a turn or river decision, Save, and Open.
+The Study page has three regions. Node navigation (board, betting line, action history) sits above the range matrix. A permanent right rail shows Actions and Hands. The lower dock holds Compare runouts, Equity, Categories, and Value / Bluffs. The context strip shows board, pot, stack / SPR, root, to act, and line, plus Compare runouts on a turn or river decision, Save, and Open. View can hide the lower dock, switch between one matrix and a dual range matrix, and reset the layout. That layout is stored in localStorage (`study-layout-v3`). There is no named layout library.
 
 Solve, Continue, Pause, and Stop are in the status bar. The bar shows Iter, EV, and Acc. More shows Time, ETA, Rate, Job, and Mem. Chrome is dark-only. The help overlay (`?`) lists `s` Solve, `x` Stop, `c` Continue, and `?` Toggle help. The Solve menu shows S, C, and X.
 
@@ -148,9 +148,9 @@ npm run tauri:build
 
 | Lock / strategy / compare op | UI | Backend |
 | --- | --- | --- |
-| Lock selected / Lock selected on line / Lock all hands / Lock line across runouts | Node Locking workspace (paint hand classes) | `put_lock` |
+| Lock selected / Lock selected on line / Lock all hands / Lock line across runouts | Node Locking workspace (paint hand classes). Draft helpers: Seed from strategy, Revert draft, Clear selection, Select all | `put_lock` |
 | Unlock selected / Unlock node / Unlock line across runouts / Clear all locks | Node Locking workspace | `delete_lock` |
-| Apply strategy edit | Strategy editor | `put_strategy_edit` |
+| Seed from strategy / Revert draft / Apply strategy edit | Strategy editor. Seed and Revert edit the draft. Apply writes it | `put_strategy_edit` |
 | Clear selected edits / Clear node edits / Clear all strategy edits | Strategy editor | `delete_strategy_edit` |
 | Resolve locked | Solve menu, Tree menu, and the lock drawer | `resolve_locked` |
 | Compare to baseline | Compare workspace and the lock drawer | `compare` (baseline snapshot vs scenario) |
