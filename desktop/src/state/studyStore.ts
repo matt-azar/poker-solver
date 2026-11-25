@@ -4130,8 +4130,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       phase: "saving",
       message: studyOnly ? `Saving study ${target}…` : `Saving ${target}…`,
     });
-    // Open/Save run as explorer overlay jobs (202 + status). Keep polling so
-    // the accept loop stays free for `/api/status` during the write.
+    // Open and Save are host jobs. Keep status polling until the job finishes.
     try {
       await engineClient.save(solutionId, target, { studyOnly });
     } catch (error) {
@@ -4180,8 +4179,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       phase: "loading",
       message: `Opening ${target}…`,
     });
-    // Open is accepted as 202; the client polls status until the file job
-    // settles. Leave Study polling running so progress stays live.
+    // Open waits until the host job finishes. Leave status polling running.
     try {
       await engineClient.open(target);
     } catch (error) {

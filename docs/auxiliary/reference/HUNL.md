@@ -1,6 +1,6 @@
 # Unrestricted heads-up no-limit Hold'em
 
-The production solvers find an equilibrium of a finite bet-size tree: a river, turn, or flop small enough to store under the engine budget. Unrestricted HUNL — any legal chip amount at every decision, full unbucketed postflop — exceeds commodity memory. The largest exact tree measured here is a uniform full-range check-down on `Ah Kd 7c`: 5,197,920 stored information sets and about 399 MiB of solver-owned heap inside the default 1024 MiB budget. Expanded histories on that tree are in the billions. Smaller checked abstractions include a `22+` versus `22+` river with two bet sizes (882 information sets) and a one-combo check-only flop (4,052). See [BENCHMARKS.md](../engineering/BENCHMARKS.md).
+The production solver finds an equilibrium of a finite bet-size tree: a river, turn, or flop small enough to store under the engine budget. Unrestricted HUNL — any legal chip amount at every decision, full unbucketed postflop — exceeds commodity memory. The largest exact tree measured here is a uniform full-range check-down on `Ah Kd 7c`: 5,197,920 stored information sets and about 399 MiB of solver-owned heap inside the default 1024 MiB budget. Expanded histories on that tree are in the billions. Smaller checked abstractions include a `22+` versus `22+` river with two bet sizes (882 information sets) and a one-combo check-only flop (4,052). See [BENCHMARKS.md](../engineering/BENCHMARKS.md).
 
 ## Abstraction choices
 
@@ -14,7 +14,7 @@ The production solvers find an equilibrium of a finite bet-size tree: a river, t
 
 **Discounted CFR.** The shipped trainer is CFR+. Linear CFR weights iteration `t` by `t` on both the regret increment and the average. Fixed DCFR(α=1.5, β=0, γ=2) uses alternating OOP and IP frozen passes, signed regrets discounted once per completed pass with `t^1.5/(t^1.5+1)` on positives and `0.5` on non-positives, and average weight `t^2`. The host trains CFR+. See [MATHEMATICS.md](../../MATHEMATICS.md).
 
-**Subgame solving.** Libratus-style resolving re-solves a public state with a gadget for the opponent's range. The river/street solvers take a pot and two ranges and solve that subtree; the caller supplies the ranges.
+**Subgame solving.** Libratus-style resolving re-solves a public state with a gadget for the opponent's range. The solver takes a pot and two ranges and solves that subtree. The caller supplies the ranges.
 
 **Exploitability.** The Nash gap diagnostic is NashConv, `(u0(BR0)-u0(σ̄)) + (u1(BR1)-u1(σ̄))`, from an exact best response on the game that was solved. Under zero-sum chips that equals `u0(BR0) + u1(BR1)`. Pio Accuracy / stop criterion is half of that sum.
 
