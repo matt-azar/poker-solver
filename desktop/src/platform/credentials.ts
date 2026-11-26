@@ -1,9 +1,9 @@
 /**
  * Study-setup assistant credential lookup.
  *
- * Preference order for the desktop prototype:
+ * Preference order:
  * 1. Tauri native secret commands (OS keyring; legacy app-config file migrate-on-read)
- * 2. Browser prototype localStorage (user-provided; never shipped in source)
+ * 2. Browser dev localStorage (user-provided; never shipped in source)
  *
  * A distributed product should use an authenticated backend proxy so the
  * client never holds a long-lived vendor API key. This module never embeds keys.
@@ -144,7 +144,7 @@ export function describeCredentialSource(source: CredentialSource): string {
     case "tauri":
       return "Tauri OS credential store (keyring; outside the JS bundle)";
     case "localStorage":
-      return "Browser localStorage prototype key (user-provided; not for distribution)";
+      return "Browser localStorage key (user-provided; not for distribution)";
     case "none":
       return "No credential configured";
   }

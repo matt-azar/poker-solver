@@ -68,7 +68,7 @@ Use this when answering **how-to / product** questions via `answer_user`. Numeri
 2. **Solve** (menu or `S`) — when the engine is connected and the draft is valid.
 3. **Study** — node navigation above the range matrix, permanent right rail (Actions and Hands), lower analysis dock. Solve, Continue, Pause, and Stop are in the status bar.
 4. **Pause / Continue / Stop** — chunk-boundary pause; Continue resumes; Stop ends.
-5. **File → Save / Open** — in-app solutions catalogue (folders allowed; Browse disk optional); Library lists recent solutions and templates.
+5. **File → Open solution… / Save solution…** — in-app solutions catalogue (folders allowed; Browse disk optional). File also lists Reopen last checkpoint, Undo range, and Redo range. Library lists Recent solutions, Templates, and Range presets.
 6. **Equity** — standalone equity calculator; Build can open current ranges there.
 
 ## Range catalogue (high level)
@@ -158,8 +158,9 @@ Settings opens from the menu-bar gear (aria-label **Settings**). **Algorithm** i
 - **Compare runouts** ranks cards on the current betting line from a river (or other) decision — check the displayed seat before reading the numbers. The assistant can open this report with card filters and frequency ranking via `compare_runouts`; clicks and **Open in Study** use the same navigation as a manual report click and stay bound to the send-time solution/policy.
 - **Value / Bluffs** lists betting candidates. Size toggles keep combos that use the selected size and show that size's frequency. Equity mode is **At this node** or **After call** (for each combo, equity on the Call child of that combo's highest-frequency enabled size). The table shows 50 rows and can load more. Assistant bluff candidates use node equity.
 - The floating Study assistant binds evidence to the **send-time** Study decision (solution, published policy revision, node, selected hand). Strategy / bluff / hand tools reuse the analysis scheduler and do **not** change Study selection. `compare_runouts` is the exception that opens Compare runouts with filters. The assistant never starts Solve.
-- Solve, Pause, Continue, and Stop are in the status bar and the Solve menu. Shortcuts: `S` solve, `X` stop, `C` continue, when connected and the draft is valid.
-- File → Save / Open — in-app solutions catalogue with user folders (OS file picker is secondary Browse disk); Library lists recent solutions and templates.
+- Solve, Pause, Continue, and Stop are in the status bar and the Solve menu. The Solve menu also lists Calculate EV, Resolve locked, and Compare to baseline. Shortcuts: `S` solve, `X` stop, `C` continue, when connected and the draft is valid.
+- File lists Open solution…, Save solution…, Reopen last checkpoint, Undo range, and Redo range. Save and Open use the in-app solutions catalogue with user folders (OS file picker is secondary Browse disk). Library lists Recent solutions, Templates, and Range presets.
+- View stores one layout in localStorage (`study-layout-v3`): lower dock, one matrix or dual range, and sizes. Menu items are Hide/Show lower dock, Dual range layout / Single matrix, and Reset layout.
 - Locks: Tree → Node locking… . Strategy edits: separate drawer.
 - Equity workspace: standalone 2–6 player calculator (no solution required).
 

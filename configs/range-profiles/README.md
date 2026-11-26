@@ -18,11 +18,11 @@ duplicate tree reappears under `desktop/src/domain/profiles/{fixtures,packs}`.
 - Prefer **standard/GTO catalogue** language over “my profile”.
 - Assistant may **generate** guarded ranges or **interpolate** between imported stack brackets; those paths are labelled `model_generated` / `interpolated` and are not equilibrium claims.
 
-## Reliable packs vs fixtures
+## Packs and fixtures
 
 | Kind | Location | Use |
 | --- | --- | --- |
-| **Reliable packs** | `packs/` plus user charts saved in Build → Catalogue | Study-quality; set classification to `equilibrium_model` / `population_estimate` |
+| **Seat×action packs** | `packs/seat-action/` plus user charts saved in Build → Catalogue | User-provided charts. Classification is `population_estimate`. |
 | **Synthetic fixtures** | `fixture-*.json` | Matcher / assistant plumbing tests only |
 
 Fixtures deliberately use different OOP vs IP placeholder shapes but remain **wrong vs real GTO**. Do not study from them. See `packs/README.md`.

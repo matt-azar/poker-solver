@@ -28,9 +28,9 @@ Browser-only `npm run dev` does not start an engine.
 
 ## Study layout
 
-The Study page has three regions. Node navigation (board, betting line, action history) sits above the range matrix. A permanent right rail shows Actions and Hands. The lower dock holds Compare runouts, Equity, Categories, and Value / Bluffs. The context strip shows board, pot, stack / SPR, root, to act, and line, plus Compare runouts on a turn or river decision, Save, and Open.
+The Study page has three regions. Node navigation (board, betting line, action history) sits above the range matrix. A permanent right rail shows Actions and Hands. The lower dock holds Compare runouts, Equity, Categories, and Value / Bluffs. The context strip shows board, pot, stack / SPR, root, to act, and line, plus Compare runouts on a turn or river decision, Save, and Open. View can hide the lower dock, switch between one matrix and a dual range matrix, and reset the layout. That layout is stored in localStorage (`study-layout-v3`).
 
-Solve, Continue, Pause, and Stop are in the status bar. The bar shows Iter, EV, and Acc. More shows Time, ETA, Rate, Job, and Mem. Chrome is dark-only. The help overlay (`?`) lists `s` Solve, `x` Stop, `c` Continue, and `?` Toggle help. The Solve menu shows S, C, and X.
+Solve, Continue, Pause, and Stop are in the status bar. The bar shows Iter, EV, and Acc. More shows Time, ETA, Rate, Job, and Mem. Chrome is dark-only. The help overlay (`?`) lists `s` Solve, `x` Stop, `c` Continue, and `?` Toggle help. The Solve menu lists Solve (S), Continue (C), Pause, Stop (X), Calculate EV, Resolve locked, and Compare to baseline. Calculate EV requests action values for the current decision. File lists Open solution…, Save solution…, Reopen last checkpoint, Undo range, and Redo range.
 
 ## Other entries
 
@@ -62,8 +62,8 @@ IPC ops are protocol-2 host methods on `solver-engine` (`desktop/src/engine/tran
 | Strategy edits | `list_strategy_edits` / `put_strategy_edit` / `delete_strategy_edit` | Strategy editor drawer (separate from locks) | Session-only overlays; sum≈1; clear restores CFR average | `strategyEdits.test.ts` (ZR-101) |
 | Resolve locked | `resolve_locked` | Solve menu, Tree menu, and the lock drawer | New solution + baseline | client IPC tests (ZR-100) |
 | Compare | `compare` | Compare workspace | Immutable baseline retained on `resolve_locked`; strategy/EV deltas vs scenario | host + desktop vitest |
-| Save / Open | `save`, `open` | File → Save solution… / Open solution…, and Study Save / Open | Save mode **Study** sends `study_only: true` and drops trainer tables. Save mode **Continue** keeps them. PSOL + locks; folders in localStorage index under managed solutions root; Browse disk secondary; invalid strategy rows rejected before replace. Browse-only files disable Continue | contract smoke; checkpoint + `solutionsCatalogue` vitest |
-| Recent / templates / ranges | Tauri FS `library_*` (not engine HTTP) | Library + File menu | Nested `configs/ranges`; flat `configs/templates`; staged via `bundle.resources` | library IPC vitest; `check:library-assets` |
+| Save / Open | `save`, `open` | File → Open solution…, Save solution…, Reopen last checkpoint, and Study Save / Open | Save mode **Study** sends `study_only: true` and drops trainer tables. Save mode **Continue** keeps them. The PSOL ceiling is 4 GiB. Open reads version 4 only. A file version below 4 returns `LegacyCheckpointRejected`, or `Kind2RiverRejected` when the old kind byte is 2, and leaves the previous solution in place. PSOL + locks; folders in localStorage index under managed solutions root; Browse disk secondary; invalid strategy rows rejected before replace. Browse-only files disable Continue. Open and Save keep status polling until the host job finishes | contract smoke; checkpoint + `solutionsCatalogue` vitest |
+| Recent / templates / ranges | Tauri FS `library_*` (not engine HTTP) | Library (Recent solutions, Templates, Range presets) | Nested `configs/ranges`; flat `configs/templates`; staged via `bundle.resources` | library IPC vitest; `check:library-assets` |
 | Config parse | local TS (`streetConfigText`) | Build | `street-config 1` only; echoes `tree_edits`; no host session mutate | `streetConfigText.test.ts` |
 | Memory plan dry-run | `plan_memory` | Build strip shows Plan peak, Budget, decision count, deal count, pot, and stack | JSON field `estimated_peak_bytes` is the plan. It is not process RSS. Temp compile. | TreeLineEditor tests |
 | Tree preview / line edits | `tree_preview` | Preview tree starts collapsed. Decision branches start collapsed. Force/Remove/Add size → draft `tree_edits`. Same `buildJob` serializer as Solve | Canonical labels; must not wipe loaded Study; failed preview leaves solution | tree-edit vitest |
@@ -148,9 +148,9 @@ npm run tauri:build
 
 | Lock / strategy / compare op | UI | Backend |
 | --- | --- | --- |
-| Lock selected / Lock selected on line / Lock all hands / Lock line across runouts | Node Locking workspace (paint hand classes) | `put_lock` |
+| Lock selected / Lock selected on line / Lock all hands / Lock line across runouts | Node Locking workspace (paint hand classes). Draft helpers: Seed from strategy, Revert draft, Clear selection, Select all | `put_lock` |
 | Unlock selected / Unlock node / Unlock line across runouts / Clear all locks | Node Locking workspace | `delete_lock` |
-| Apply strategy edit | Strategy editor | `put_strategy_edit` |
+| Seed from strategy / Revert draft / Apply strategy edit | Strategy editor. Seed and Revert edit the draft. Apply writes it | `put_strategy_edit` |
 | Clear selected edits / Clear node edits / Clear all strategy edits | Strategy editor | `delete_strategy_edit` |
 | Resolve locked | Solve menu, Tree menu, and the lock drawer | `resolve_locked` |
 | Compare to baseline | Compare workspace and the lock drawer | `compare` (baseline snapshot vs scenario) |
