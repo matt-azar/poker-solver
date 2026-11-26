@@ -1,4 +1,4 @@
-# Reliable range packs
+# Range packs
 
 ## Seat×action pack (preferred)
 

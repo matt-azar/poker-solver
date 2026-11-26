@@ -242,7 +242,7 @@ function asFiniteNumber(value: unknown): number | undefined {
 }
 
 /**
- * Map opened /api/status fields onto SpotDraft.
+ * Map opened status fields onto SpotDraft.
  *
  * Status omits ranges / bet sizes / tree_edits. Callers that Open a solution
  * must replace the draft wholesale (see draftFromOpenedSolution) rather than

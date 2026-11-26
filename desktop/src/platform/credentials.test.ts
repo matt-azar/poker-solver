@@ -13,7 +13,7 @@ describe("assistant credentials (browser path)", () => {
     vi.restoreAllMocks();
   });
 
-  it("reads and writes the browser prototype key without embedding secrets", async () => {
+  it("reads and writes the browser localStorage key without embedding secrets", async () => {
     expect(await hasAssistantOpenAiCredential()).toBe(false);
     const source = await setAssistantOpenAiCredential(" sk-test-key ");
     expect(source).toBe("localStorage");

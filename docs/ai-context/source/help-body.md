@@ -9,7 +9,7 @@
 2. **Solve** (menu or `S`) — when the engine is connected and the draft is valid.
 3. **Study** — node navigation above the range matrix, permanent right rail (Actions and Hands), lower analysis dock. Solve, Continue, Pause, and Stop are in the status bar.
 4. **Pause / Continue / Stop** — chunk-boundary pause; Continue resumes; Stop ends.
-5. **File → Save / Open** — in-app solutions catalogue (folders allowed; Browse disk optional); Library lists recent solutions and templates.
+5. **File → Open solution… / Save solution…** — in-app solutions catalogue (folders allowed; Browse disk optional). File also lists Reopen last checkpoint, Undo range, and Redo range. Library lists Recent solutions, Templates, and Range presets.
 6. **Equity** — standalone equity calculator; Build can open current ranges there.
 
 ## Range catalogue (high level)
