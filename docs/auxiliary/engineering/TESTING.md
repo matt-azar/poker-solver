@@ -35,7 +35,7 @@ Windows: use `python` and `zig-out/bin/solver-engine.exe` the same way. On x86_6
 
 | Layer | Entry | Covers |
 | --- | --- | --- |
-| Zig unit / integration | `zig build test` | Engine CFR/frozen/locks/equity/ICM math pins, Session train/eval, host dispatch envelopes under `tests/zig/` + `engine/` |
+| Zig unit / integration | `zig build test` | Engine CFR/frozen/locks/equity/ICM math pins, Session train/eval, and host dispatch envelopes. The test blocks live in `engine/`, `app/`, `formats/`, and `host/`. |
 | Ready smoke | `scripts/zig/ready-smoke.py` | Protocol-2 ready handshake on a live `solver-engine` process |
 | Study contract smoke | `scripts/zig/study-contract-smoke.py` | Real-sidecar typed IPC lifecycle used by Study (ZR-104). Uses `benchmarks/study/configs/river_gate_smoke.txt`. **No Accuracy wall.** |
 | Study job CLI smoke | `scripts/zig/holdem-study-cli-smoke.py` | `holdem-study-cli` from-hh, plan, and solve on the example river job. Runs in `zig.yml`. |

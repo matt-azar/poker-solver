@@ -51,6 +51,18 @@ timeline
     Nov 13 : Zig Windows 0.1.5 : Debug capture suite : IPC hang fixes : Async Rust IPC stack
 ```
 
+### November 14–19
+
+```mermaid
+timeline
+    Nov 14 : Windows 0.1.6
+    Nov 15 : Public demo : River browser beta
+    Nov 16 : Study job file : Settings shows CFR+ only
+    Nov 17 : Windows 0.1.7
+    Nov 18 : Study layout : ICM on frozen CFR+
+    Nov 19 : Dark-only chrome : Windows 0.1.8
+```
+
 ## The first Hold’em solver
 
 On October 26, the first commits set up the engine and tests, then gave CFR and CFR+ a shared trainer. The Hold’em code added a seven-card evaluator, an index for the 1,326 distinct two-card combinations, and a way to assign a weight to each combo. The river solver dealt the two hands jointly from their ranges. It removed pairs that shared a card with each other or with the board, then normalized the remaining pair weights. This made a player’s hand distribution depend on which hands the other player could hold. [Shared CFR trainer](https://github.com/matt-azar/poker-solver/commit/18f2f48d0d52bf3de99b8fd95c49e0ee14eca741) · [Hold’em cards and ranges](https://github.com/matt-azar/poker-solver/commit/6d8b8cc3e1d8b23bc201515eb6f6dcc4659bd43c) · [Joint hand distribution](../../HOLDEM.md#joint-distribution)

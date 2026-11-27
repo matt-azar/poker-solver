@@ -4,7 +4,7 @@
  *
  * Uses raw strategy-conditioned reaches (not posterior marginals) so the
  * engine applies opponent blockers once. Midstreet extraction is out of scope
- * until StreetConfig carries initial betting state.
+ * until StreetSpec carries initial betting state.
  */
 import type { PathStep } from "../actionHistory";
 import { normalizeBoardCards } from "../cards";

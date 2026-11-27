@@ -79,7 +79,7 @@ export interface SolveJobRequest {
     tags: string[];
   }>;
   time_limit?: number;
-  /** TreeEditSet lines (`force - c`, `remove Check/Bet 50 b50`, `add-size - 0.33`). */
+  /** One `tree-edit` line (`force - c`, `remove Check/Bet 50 b50`, `add-size - 0.33`). */
   tree_edits?: string[];
 }
 
@@ -375,7 +375,7 @@ export interface SpotDraft {
   edgeTags: string;
   timeLimit: string;
   solutionPath: string;
-  /** One TreeEditSet line per entry (Force/Remove/AddSize). */
+  /** One `tree-edit` line per entry (Force/Remove/AddSize). */
   treeEdits: string[];
 }
 
