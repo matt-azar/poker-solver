@@ -256,7 +256,7 @@ The phases below were the kernel plan through the baseline reviewed above. They 
 | Phase | Status |
 | --- | --- |
 | 1. Repository and tests | Complete |
-| 2. Early CFR trainer fixtures (removed; Hold’em `StreetGame` pins remain) | Complete |
+| 2. Early CFR trainer fixtures (removed; Hold’em rematch pins remain) | Complete |
 | 3. Generalized CFR engine + CFR+ | Complete |
 | 4. Early multi-street trainer fixture (removed) | Complete |
 | 5. Hold’em cards, evaluator, ranges | Complete |

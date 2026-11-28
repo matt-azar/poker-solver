@@ -293,7 +293,7 @@ Build **Save tree / Open tree** uses client JSON `holdem-study-betting-tree` v1 
 
 ### Create Build spot from Study
 
-Eligible only at **street-start** turn/river OOP decisions (#193). Copy **raw** strategy-conditioned reaches (not posterior marginals), node pot, and effective remaining stack; reuse source sizing via host `get_config`; clear path-scoped tree edits / incentives / ICM. When IP aggressed on the prior street, **bake donk sizes** into OOP’s starting-street bets (new trees have no prior aggressor). Verify root legal actions with `tree_preview`; open Build for review — do **not** auto-solve. Midstreet extraction (facing bet / street contrib) stays out of scope until `StreetConfig` carries initial betting state. No Study control calls `createBuildSpotFromHere`. The context strip shows Compare runouts, Save, and Open.
+Eligible only at **street-start** turn/river OOP decisions (#193). Copy **raw** strategy-conditioned reaches (not posterior marginals), node pot, and effective remaining stack; reuse source sizing via host `get_config`; clear path-scoped tree edits / incentives / ICM. When IP aggressed on the prior street, **bake donk sizes** into OOP’s starting-street bets (new trees have no prior aggressor). Verify root legal actions with `tree_preview`; open Build for review — do **not** auto-solve. Midstreet extraction (facing bet / street contrib) stays out of scope until `StreetSpec` carries initial betting state. No Study control calls `createBuildSpotFromHere`. The context strip shows Compare runouts, Save, and Open.
 
 ### Study UI paint order
 
@@ -382,15 +382,15 @@ On historically flop/turn-only pages, river `/values` returned 400 until river E
 
 ### Equity ≠ chip EV
 
-Check-down equity is a **fraction of the pot** under check-down. Strategic EV is **root-centered chips**. Keep units and labels separate (`docs/EQUITY.md`, `StreetNodeEquity`).
+Check-down equity is a **fraction of the pot** under check-down. Strategic EV is **root-centered chips**. Keep units and labels separate (`docs/EQUITY.md`, `checkdownEquityAtNode` in `engine/src/analysis/equity.zig`).
 
 **Categories:** five-card boards → exclusive made-hand mass; flop/turn → multi-label draw/backdoor tags (`model: "draws"`, `exclusive: false`). Host `categories` JSON lists names parallel to seat fractions. Do not reintroduce the Zig cutover `available=false` short-board banner.
 
 ### Memory budget
 
-`StreetConfig::memory_mib` (default 1024, zero rejected) bounds **engine-owned heap** charged before allocate. Not process RSS. `estimated_peak_bytes` is a plan; `peak_allocated_bytes` is measured. Stacks, RSS, exports, and some caches sit outside the budget.
+`StreetSpec.memory_mib` (default 1024, zero rejected) bounds **engine-owned heap** charged before allocate. Not process RSS. `estimated_peak_bytes` is a plan; `peak_allocated_bytes` is measured. Stacks, RSS, exports, and some caches sit outside the budget.
 
-**Pointers:** `docs/STREETS.md`, `StreetMemoryReport`, commits `56d6f38`, `3e9b9ef`.
+**Pointers:** `docs/STREETS.md`, host `plan_memory` / status `peak_allocated_bytes`, commits `56d6f38`, `3e9b9ef`.
 
 ### Hard limits agents rediscover the hard way
 
@@ -411,7 +411,7 @@ Check-down equity is a **fraction of the pot** under check-down. Strategic EV is
 
 ### Betting semantics (street)
 
-Sizes are pot fractions unless negative / `Nc` chip form, or a Pio sentinel (`e`, `Ne`, `a`, `Nx`, `-`). Street-specific lists replace shared lists on that street. Empty raise list with non-empty raise-multiples does not fall back to bet sizes. Geometric = equal pot fractions over streets left at that node (river = all-in fraction). `2e` is two equal bets from the current pot and stack, not twice the root fraction — TS encoding must match the engine size rules; do not revive helpers that multiply the geometric fraction or a global geometric flag. Donk sizes only after IP aggression previous street; explicit-empty donk checks. `--no-three-bet` removes the re-raise (Study uses **Max raises** instead; no Build "No 3-bet" toggle). All-in threshold (Pio: fraction of **starting stack**, not pot%) snaps a size that would commit more than that fraction to all-in; default `0.5` (more than half the stack). A listed size above remaining stack is always re-interpreted as all-in (DS-26). List `a` explicitly for an all-in size. Legacy Study 0.1.6 `allow-all-in` on the wire is **honored** on parse (when `0`, oversized sizes drop — check-only river) so PSOL reopen tree+strategy match; never silent-ignore (that diverges trees / breaks Continue). `formatStreetConfig` does not emit it. Layout mismatch on open → `IncompatibleSave` / `incompatible_save`, not bare `InvalidPsol`.
+Sizes are pot fractions unless negative / `Nc` chip form, or a Pio sentinel (`e`, `Ne`, `a`, `Nx`, `-`). Street-specific lists replace shared lists on that street. Empty raise list with non-empty raise-multiples does not fall back to bet sizes. Geometric = equal pot fractions over streets left at that node (river = all-in fraction). `2e` is two equal bets from the current pot and stack, not twice the root fraction — TS encoding must match the engine size rules; do not revive helpers that multiply the geometric fraction or a global geometric flag. Donk sizes only after IP aggression previous street; explicit-empty donk checks. `allow-three-bet 0` removes the re-raise. Build has no No 3-bet control. **Max raises** writes `max-raises`. There is no `--no-three-bet` flag. All-in threshold (Pio: fraction of **starting stack**, not pot%) snaps a size that would commit more than that fraction to all-in; default `0.5` (more than half the stack). A listed size above remaining stack is always re-interpreted as all-in (DS-26). List `a` explicitly for an all-in size. Legacy Study 0.1.6 `allow-all-in` on the wire is **honored** on parse (when `0`, oversized sizes drop — check-only river) so PSOL reopen tree+strategy match; never silent-ignore (that diverges trees / breaks Continue). `formatStreetConfig` does not emit it. Layout mismatch on open → `IncompatibleSave` / `incompatible_save`, not bare `InvalidPsol`.
 
 **Pointers:** `docs/STREETS.md`, Zig `street_config` under `engine/`.
 

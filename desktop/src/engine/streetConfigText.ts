@@ -1,7 +1,6 @@
 /**
  * Serialize a Study SolveJobRequest to `street-config 1` text for solver-engine
- * `begin_config`. Size tokens match C++/Zig `format_spec` (pot fractions, not
- * Build UI percentages).
+ * `begin_config`. Size tokens are pot fractions, not Build UI percentages.
  */
 import {
   isAllInSpec,

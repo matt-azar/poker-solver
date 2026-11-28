@@ -34,7 +34,7 @@ pub const IncentiveConfig = struct {
     edge_tags: []IncentiveEdgeTagSpec = &.{},
 };
 
-/// Typed game specification (C++ StreetConfig). Owned slices use `allocator`.
+/// Typed game specification. Owned slices use `allocator`.
 pub const StreetSpec = struct {
     allocator: std.mem.Allocator,
     board: []card.Card = &.{},

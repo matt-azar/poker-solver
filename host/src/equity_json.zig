@@ -1,5 +1,5 @@
 //! Study-shaped equity JSON for the host IPC `equity` op (D1: IPC outside engine).
-//! Packs `analysis.equity.checkdownEquity` into the explorer Study `/equity` body shape.
+//! Packs `analysis.equity.checkdownEquity` into the host `equity` JSON body.
 const std = @import("std");
 const poker_engine = @import("poker_engine");
 
@@ -88,7 +88,7 @@ pub const PackArgs = struct {
     page: *const equity.ShowdownEquity,
 };
 
-/// Build Study `/equity`-compatible body JSON (caller frees).
+/// Build the host equity JSON body (caller frees).
 pub fn packStudyEquityBody(allocator: std.mem.Allocator, args: PackArgs) PackError![]u8 {
     const defined = args.page.joint_defined and args.page.player0.defined and args.page.player1.defined;
     var oop_dist = if (defined)

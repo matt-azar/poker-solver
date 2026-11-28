@@ -51,6 +51,18 @@ timeline
     Nov 13 : Zig Windows 0.1.5 : Debug capture suite : IPC hang fixes : Async Rust IPC stack
 ```
 
+### November 14–19
+
+```mermaid
+timeline
+    Nov 14 : Windows 0.1.6
+    Nov 15 : Public demo : River browser beta
+    Nov 16 : Study job file : Settings shows CFR+ only
+    Nov 17 : Windows 0.1.7
+    Nov 18 : Study layout : ICM on frozen CFR+
+    Nov 19 : Dark-only chrome : Windows 0.1.8
+```
+
 ## The first Hold’em solver
 
 On October 26, the first commits set up the engine and tests, then gave CFR and CFR+ a shared trainer. The Hold’em code added a seven-card evaluator, an index for the 1,326 distinct two-card combinations, and a way to assign a weight to each combo. The river solver dealt the two hands jointly from their ranges. It removed pairs that shared a card with each other or with the board, then normalized the remaining pair weights. This made a player’s hand distribution depend on which hands the other player could hold. [Shared CFR trainer](https://github.com/matt-azar/poker-solver/commit/18f2f48d0d52bf3de99b8fd95c49e0ee14eca741) · [Hold’em cards and ranges](https://github.com/matt-azar/poker-solver/commit/6d8b8cc3e1d8b23bc201515eb6f6dcc4659bd43c) · [Joint hand distribution](../../HOLDEM.md#joint-distribution)
@@ -206,7 +218,7 @@ Later on November 18 the Study page became node navigation above the range matri
 
 On November 19 the chrome became dark-only. The Settings theme control and the menu theme button were removed. A stored light or system preference is dropped on read. [Dark-only chrome](https://github.com/matt-azar/poker-solver/pull/490)
 
-On November 19 the package versions moved to `0.1.8` for the Windows installer cut `v0.1.8-windows`. Desktop, Tauri, and Cargo versions are `0.1.8`. Pushing the annotated tag publishes that installer and makes it the current download. Since 0.1.7, Study gained an Equity Calculator over IPC, a Study save that omits trainer tables, dual-session Compare, flop and turn draw Categories, and the dark-only layout above. ICM terminals stay in frozen CFR+, starting stacks for the remaining field must be positive, and Continue stays off on pre-fix ICM saves. Build, Open, Save, and train share one exclusive mutation gate. [Windows 0.1.8](https://github.com/matt-azar/poker-solver/pull/493) · [Equity calculator](https://github.com/matt-azar/poker-solver/pull/439) · [Study-only save](https://github.com/matt-azar/poker-solver/pull/445) · [Compare](https://github.com/matt-azar/poker-solver/pull/446) · [Categories](https://github.com/matt-azar/poker-solver/pull/447) · [ICM terminals](https://github.com/matt-azar/poker-solver/pull/484) · [ICM Continue gate](https://github.com/matt-azar/poker-solver/pull/486) · [ICM stacks](https://github.com/matt-azar/poker-solver/pull/487) · [Study layout](https://github.com/matt-azar/poker-solver/pull/489) · [Dark-only chrome](https://github.com/matt-azar/poker-solver/pull/490) · [Exclusive admission](https://github.com/matt-azar/poker-solver/pull/479)
+On November 19 the package versions moved to `0.1.8` for the Windows installer cut `v0.1.8-windows`. Desktop, Tauri, and Cargo versions are `0.1.8`. Pushing the annotated tag publishes that installer and makes it the current download. Since 0.1.7, Study gained an Equity Calculator over IPC, a Study save that omits trainer tables, dual-session Compare, flop and turn draw Categories, and the dark-only layout above. ICM terminals stay in frozen CFR+, starting stacks for the remaining field must be positive, and Continue stays off on pre-fix ICM saves. Build, Open, Save, and train share one exclusive mutation gate. [Windows 0.1.8](https://github.com/matt-azar/poker-solver/pull/493) · [Equity calculator](https://github.com/matt-azar/poker-solver/pull/439) · [Study save](https://github.com/matt-azar/poker-solver/pull/445) · [Compare](https://github.com/matt-azar/poker-solver/pull/446) · [Categories](https://github.com/matt-azar/poker-solver/pull/447) · [ICM terminals](https://github.com/matt-azar/poker-solver/pull/484) · [ICM Continue gate](https://github.com/matt-azar/poker-solver/pull/486) · [ICM stacks](https://github.com/matt-azar/poker-solver/pull/487) · [Study layout](https://github.com/matt-azar/poker-solver/pull/489) · [Dark-only chrome](https://github.com/matt-azar/poker-solver/pull/490) · [Exclusive admission](https://github.com/matt-azar/poker-solver/pull/479)
 
 ## Current documentation
 

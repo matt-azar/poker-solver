@@ -54,4 +54,4 @@ Host `solve` passes `iterations`, `accuracy` (pot fraction of Pio Accuracy), opt
 - Production trees use a fixed list of bet sizes, plus geometric, all-in, and pot-cap rules.
 - Best response is exact on the game that was solved.
 - At most 8 actions per information set.
-- Zig tests under `engine/` pin the trainer.
+- `zig build test` runs the test blocks in `engine/`, `app/`, `formats/`, and `host/`.
